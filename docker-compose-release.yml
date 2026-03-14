@@ -1,6 +1,6 @@
 services:
   sandbox:
-        image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-sandbox:release-20260314
+    image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-sandbox:release-20260314
     security_opt:
     - seccomp:unconfined
     extra_hosts:
@@ -27,7 +27,7 @@ services:
       timeout: 3s
       retries: 30
   mongo:
-        image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-mongo:release-20260314
+    image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-mongo:release-20260314
     environment:
       MONGO_INITDB_ROOT_USERNAME: scienceone
       MONGO_INITDB_ROOT_PASSWORD: Yp51Bi1eEjC77sAt
@@ -37,7 +37,7 @@ services:
     - scienceclaw_mongo_data:/data/db
     restart: unless-stopped
   searxng:
-        image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-searxng:release-20260314
+    image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-searxng:release-20260314
     environment:
       SEARXNG_BASE_URL: http://localhost:8080/
       SEARXNG_LIMITER: 'false'
@@ -48,7 +48,7 @@ services:
     - 8080:8080
     restart: unless-stopped
   websearch:
-        image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-websearch:release-20260314
+    image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-websearch:release-20260314
     environment:
       SEARXNG_HOST: searxng
       SEARXNG_PORT: 8080
@@ -63,7 +63,7 @@ services:
       searxng:
         condition: service_started
   backend:
-        image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-backend:release-20260314
+    image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-backend:release-20260314
     volumes:
     - ./Tools:/app/Tools
     - ./Skills:/app/Skills
@@ -122,10 +122,10 @@ services:
       timeout: 5s
       retries: 30
   redis:
-        image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-redis:release-20260314
+    image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-redis:release-20260314
     restart: unless-stopped
   scheduler_api:
-        image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-task-service:release-20260314
+    image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-task-service:release-20260314
     environment:
       TZ: Asia/Shanghai
       DISPLAY_TIMEZONE: ${DISPLAY_TIMEZONE:-Asia/Shanghai}
@@ -152,7 +152,7 @@ services:
       backend:
         condition: service_started
   celery_worker:
-        image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-task-service:release-20260314
+    image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-task-service:release-20260314
     environment:
       TZ: Asia/Shanghai
       MONGODB_HOST: mongo
@@ -173,7 +173,7 @@ services:
       backend:
         condition: service_started
   celery_beat:
-        image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-task-service:release-20260314
+    image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-task-service:release-20260314
     environment:
       TZ: Asia/Shanghai
       MONGODB_HOST: mongo
@@ -190,7 +190,7 @@ services:
       redis:
         condition: service_started
   frontend:
-        image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-frontend:release-20260314
+    image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-frontend:release-20260314
     environment:
       BACKEND_URL: http://backend:8000
       TASK_SERVICE_URL: http://scheduler_api:8001
