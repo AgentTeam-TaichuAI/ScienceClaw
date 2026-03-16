@@ -2,12 +2,16 @@
 chcp 65001 >nul 2>&1
 cd /d %~dp0
 mkdir workspace 2>nul
-icacls workspace Skills Tools /grant %USERNAME%:(OI)(CI)M /T
+mkdir Skills 2>nul
+mkdir Tools 2>nul
+icacls workspace /grant %USERNAME%:(OI)(CI)M /T
+icacls Skills /grant %USERNAME%:(OI)(CI)M /T
+icacls Tools /grant %USERNAME%:(OI)(CI)M /T
 
 echo ========================================
 echo   正在启动 DeepScience 服务...
 echo ========================================
-docker compose -f docker-compose-release.yaml up -d
+docker compose -f docker-compose-release.yml up -d
 
 echo.
 echo 正在等待服务启动，每 2 秒检测一次...
