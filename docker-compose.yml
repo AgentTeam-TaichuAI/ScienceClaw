@@ -79,8 +79,6 @@ services:
   backend:
     build:
       context: ./ScienceClaw/backend
-      additional_contexts:
-        websearch: ./ScienceClaw/websearch
     image: scienceclaw-backend:local
     volumes:
       - ./ScienceClaw/backend:/app/backend
