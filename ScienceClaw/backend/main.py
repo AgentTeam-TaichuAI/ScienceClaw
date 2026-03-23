@@ -25,6 +25,7 @@ from backend.route.statistics import router as statistics_router
 from backend.route.im import router as im_router, start_im_runtime, stop_im_runtime
 from backend.models import init_system_models
 from backend.user.bootstrap import ensure_admin_user
+from backend.im.migrations import backfill_session_sources
 
 
 @asynccontextmanager
@@ -42,6 +43,10 @@ async def lifespan(app: FastAPI):
         await cleanup_orphaned_sessions()
     except Exception as e:
         logger.error(f"Failed to cleanup orphaned sessions: {e}")
+    try:
+        await backfill_session_sources()
+    except Exception as e:
+        logger.error(f"Failed to backfill session sources: {e}")
     try:
         await start_im_runtime()
     except Exception as e:

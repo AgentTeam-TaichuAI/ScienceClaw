@@ -515,6 +515,8 @@ export default {
   'Chats': '对话',
   'Search chats...': '搜索对话...',
   'All': '全部',
+  'WeChat': '微信',
+  'Web': '网页',
   'Pinned': '已置顶',
   'Unpinned': '已取消置顶',
   'Shared': '已分享',

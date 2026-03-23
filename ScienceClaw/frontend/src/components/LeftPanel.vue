@@ -239,6 +239,7 @@ import UserMenu from './UserMenu.vue';
 import { useLeftPanel } from '../composables/useLeftPanel';
 import { useSessionGrouping, type FilterType } from '../composables/useSessionGrouping';
 import { useSessionListUpdate } from '../composables/useSessionListUpdate';
+import { useSessionNotifications } from '../composables/useSessionNotifications';
 import { useSettingsDialog } from '../composables/useSettingsDialog';
 import { useAuth } from '../composables/useAuth';
 import { ref, onMounted, watch, onUnmounted, computed, markRaw } from 'vue';
@@ -252,6 +253,7 @@ import { useI18n } from 'vue-i18n';
 const { t } = useI18n()
 const { isLeftPanelShow, toggleLeftPanel } = useLeftPanel()
 const { setOnSessionTitleUpdate } = useSessionListUpdate()
+const { onSessionCreated, onSessionUpdated } = useSessionNotifications()
 const { openSettingsDialog } = useSettingsDialog()
 const { currentUser } = useAuth()
 
@@ -396,6 +398,12 @@ const handleKeydown = (event: KeyboardEvent) => {
   }
 }
 
+let _refreshTimer: ReturnType<typeof setTimeout> | null = null
+const debouncedRefresh = () => {
+  if (_refreshTimer) clearTimeout(_refreshTimer)
+  _refreshTimer = setTimeout(() => updateSessions(), 500)
+}
+
 onMounted(async () => {
   updateSessions()
 
@@ -403,6 +411,9 @@ onMounted(async () => {
     const s = sessions.value.find((x) => x.session_id === sessionId)
     if (s) s.title = title
   })
+
+  onSessionCreated(debouncedRefresh)
+  onSessionUpdated(debouncedRefresh)
 
   window.addEventListener('keydown', handleKeydown)
 })

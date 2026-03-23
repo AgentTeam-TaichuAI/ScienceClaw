@@ -17,6 +17,7 @@ Sessions 路由。
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -90,6 +91,7 @@ class ListSessionItem(BaseModel):
     is_shared: bool = Field(default=False, description="Whether shared")
     mode: str = Field(default="deep", description="Session mode")
     pinned: bool = Field(default=False, description="Whether pinned")
+    source: Optional[str] = Field(default=None, description="Session source (e.g. wechat, lark)")
 
 
 class ListSessionData(BaseModel):
@@ -146,6 +148,7 @@ def _session_to_list_item(session) -> ListSessionItem:
         is_shared=getattr(session, "is_shared", False),
         mode=getattr(session, "mode", "deep"),
         pinned=getattr(session, "pinned", False),
+        source=getattr(session, "source", None),
     )
 
 
@@ -1190,6 +1193,41 @@ async def upload_session_file(
     except Exception as exc:
         logger.exception("upload_session_file failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Real-time session notifications (SSE)
+# ═══════════════════════════════════════════════════════════════════
+
+@router.get("/notifications")
+async def session_notifications(
+    request: Request,
+    current_user: User = Depends(require_user),
+) -> EventSourceResponse:
+    """SSE stream that pushes session_created / session_updated events."""
+    from backend.notifications import subscribe, unsubscribe
+
+    sub_id, events = await subscribe()
+    user_id = current_user.id
+
+    async def event_generator():
+        try:
+            async for event in events:
+                if await request.is_disconnected():
+                    break
+                evt_data = event.get("data", {})
+                if evt_data.get("user_id") and evt_data["user_id"] != user_id:
+                    continue
+                yield {
+                    "event": event["event"],
+                    "data": _json_dumps(evt_data),
+                }
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await unsubscribe(sub_id)
+
+    return EventSourceResponse(event_generator())
 
 
 # ═══════════════════════════════════════════════════════════════════

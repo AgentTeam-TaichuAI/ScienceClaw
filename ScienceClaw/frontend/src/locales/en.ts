@@ -462,6 +462,8 @@ export default {
   'Chats': 'Chats',
   'Search chats...': 'Search chats...',
   'All': 'All',
+  'WeChat': 'WeChat',
+  'Web': 'Web',
   'Pinned': 'Pinned',
   'Unpinned': 'Unpinned',
   'Shared': 'Shared',

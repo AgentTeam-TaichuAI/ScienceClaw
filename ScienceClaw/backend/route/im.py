@@ -19,6 +19,7 @@ from backend.im.system_settings import (
 )
 from backend.im.user_binding import IMUserBindingManager
 from backend.im.user_binding_service import IMUserBindingService
+from backend.im.wechat_bridge import WeChatBridge
 from backend.user.dependencies import User, require_user
 
 router = APIRouter(prefix="/im", tags=["im"])
@@ -91,7 +92,15 @@ async def reload_im_runtime() -> Optional[LarkLongConnectionService]:
 
 
 async def start_im_runtime() -> Optional[LarkLongConnectionService]:
-    return await reload_im_runtime()
+    service = await reload_im_runtime()
+
+    im_settings = await get_im_system_settings()
+    if im_settings.wechat_enabled:
+        bridge = WeChatBridge.get_instance()
+        if not bridge.is_running:
+            await bridge.start_with_saved_token()
+
+    return service
 
 
 async def stop_im_runtime():
@@ -99,6 +108,10 @@ async def stop_im_runtime():
     if _lark_long_connection_service:
         await _lark_long_connection_service.stop()
         _lark_long_connection_service = None
+
+    bridge = WeChatBridge.get_instance()
+    if bridge.is_running:
+        await bridge.stop()
 
 
 def require_admin_user(current_user: User = Depends(require_user)) -> User:
@@ -166,7 +179,56 @@ async def update_im_settings(
     return ApiResponse(data=to_public_settings_dict(updated))
 
 
-# ── Internal endpoint (sandbox → backend, no user auth) ────────────
+# ── WeChat Bridge endpoints ──────────────────────────────────────────────────
+
+
+@router.post("/wechat/start", response_model=ApiResponse)
+async def start_wechat_bridge(
+    current_user: User = Depends(require_admin_user),
+):
+    """Start WeChat QR login flow."""
+    bridge = WeChatBridge.get_instance()
+    result = await bridge.start_login(admin_user_id=current_user.id)
+    return ApiResponse(data=result)
+
+
+@router.post("/wechat/resume", response_model=ApiResponse)
+async def resume_wechat_bridge(
+    current_user: User = Depends(require_admin_user),
+):
+    """Resume WeChat connection with saved token."""
+    bridge = WeChatBridge.get_instance()
+    result = await bridge.start_with_saved_token(admin_user_id=current_user.id)
+    return ApiResponse(data=result)
+
+
+@router.post("/wechat/stop", response_model=ApiResponse)
+async def stop_wechat_bridge(_: User = Depends(require_admin_user)):
+    """Stop WeChat bridge (keeps saved token for later resume)."""
+    bridge = WeChatBridge.get_instance()
+    result = await bridge.stop()
+    return ApiResponse(data=result)
+
+
+@router.post("/wechat/logout", response_model=ApiResponse)
+async def logout_wechat_bridge(_: User = Depends(require_admin_user)):
+    """Stop and clear all saved WeChat credentials."""
+    bridge = WeChatBridge.get_instance()
+    result = await bridge.logout()
+    return ApiResponse(data=result)
+
+
+@router.get("/wechat/status", response_model=ApiResponse)
+async def get_wechat_bridge_status(
+    output_offset: int = 0,
+    _: User = Depends(require_admin_user),
+):
+    """Get WeChat bridge status, QR code, and logs."""
+    bridge = WeChatBridge.get_instance()
+    return ApiResponse(data=bridge.get_status(output_offset))
+
+
+# ── Internal endpoint (sandbox → backend, no user auth) ─────────────────────
 
 
 _INTERNAL_NETWORKS = [

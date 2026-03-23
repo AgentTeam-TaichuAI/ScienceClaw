@@ -40,6 +40,10 @@
 
           <!-- Indicators row -->
           <div class="flex items-center gap-1.5 flex-shrink-0">
+            <!-- WeChat badge -->
+            <span v-if="session.source === 'wechat'"
+              class="text-xs font-semibold px-1.5 py-0.5 rounded bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400 leading-none">微信</span>
+
             <!-- Pinned icon -->
             <Pin v-if="session.pinned" :size="12" class="text-amber-500" />
 

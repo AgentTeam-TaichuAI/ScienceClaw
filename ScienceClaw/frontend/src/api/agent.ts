@@ -37,6 +37,10 @@ export function listSessionsSSE(callbacks: SSECallbacks<any>): Promise<() => voi
   return createSSEConnection('/sessions', { method: 'GET' }, callbacks);
 }
 
+export function subscribeSessionNotifications(callbacks: SSECallbacks<any>): Promise<() => void> {
+  return createSSEConnection('/sessions/notifications', { method: 'GET' }, callbacks);
+}
+
 export async function getSession(sessionId: string): Promise<SessionDetail> {
   const response = await apiClient.get<ApiResponse<SessionDetail>>(`/sessions/${sessionId}`);
   return response.data.data;

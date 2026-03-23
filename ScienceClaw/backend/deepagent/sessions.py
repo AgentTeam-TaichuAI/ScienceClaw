@@ -63,6 +63,7 @@ class ScienceSession:
     latest_message: str = ""
     latest_message_at: int = 0
     pinned: bool = False
+    source: Optional[str] = None
 
     _shell_sessions: Dict[str, Any] = field(default_factory=dict)
 
@@ -126,6 +127,7 @@ class ScienceSession:
             "model_config": self.model_config,
             "events": self.events,
             "pinned": self.pinned,
+            "source": self.source,
         }
         await db.get_collection("sessions").update_one(
             {"_id": self.session_id},
@@ -192,9 +194,8 @@ async def async_create_science_session(
         model_config=model_config,
         created_at=now,
         updated_at=now,
+        source=source,
     )
-    if source:
-        setattr(session, "source", source)
 
     session_doc = {
         "_id": session_id,
@@ -257,6 +258,7 @@ async def async_get_science_session(session_id: str) -> ScienceSession:
         latest_message=doc.get("latest_message", ""),
         latest_message_at=doc.get("latest_message_at", 0),
         pinned=doc.get("pinned", False),
+        source=doc.get("source"),
     )
 
     async with _sessions_lock:
@@ -302,6 +304,7 @@ async def async_list_science_sessions(user_id: Optional[str] = None) -> List[Sci
             latest_message=doc.get("latest_message", ""),
             latest_message_at=doc.get("latest_message_at", 0),
             pinned=doc.get("pinned", False),
+            source=doc.get("source"),
         )
         sessions.append(s)
 

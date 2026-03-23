@@ -7,9 +7,10 @@ from typing import Any, Dict, List, Optional
 
 import shortuuid
 
-from backend.deepagent.sessions import async_create_science_session
+from backend.deepagent.sessions import async_create_science_session, async_get_science_session
 from backend.im.base import IMPlatform
 from backend.mongodb.db import db
+from backend.notifications import publish as notify
 
 
 @dataclass
@@ -164,8 +165,25 @@ class IMSessionManager:
         if existing:
             existing.updated_at = int(time.time())
             await self.session_repo.touch_session(existing.id, updated_at=existing.updated_at)
+            await self._backfill_source(existing.science_session_id, platform)
             return existing
         return await self.create_new_session(platform=platform, platform_chat_id=platform_chat_id, user_id=user_id)
+
+    async def _backfill_source(self, science_session_id: str, platform: IMPlatform) -> None:
+        """Ensure the linked ScienceSession has `source` and pinned state set."""
+        try:
+            sci = await async_get_science_session(science_session_id)
+            changed = False
+            if not sci.source:
+                sci.source = platform.value
+                changed = True
+            if platform == IMPlatform.WECHAT and not sci.pinned:
+                sci.pinned = True
+                changed = True
+            if changed:
+                await sci.save()
+        except Exception:
+            pass
 
     async def create_new_session(
         self,
@@ -178,7 +196,11 @@ class IMSessionManager:
             mode="deep",
             user_id=user_id,
             model_config=model_config,
+            source=platform.value,
         )
+        if platform == IMPlatform.WECHAT:
+            science_session.pinned = True
+            await science_session.save()
         now = int(time.time())
         im_session = IMChatSession(
             id=shortuuid.uuid(),
@@ -190,6 +212,11 @@ class IMSessionManager:
             updated_at=now,
         )
         await self.session_repo.add_session(im_session)
+        notify("session_created", {
+            "session_id": science_session.session_id,
+            "user_id": user_id,
+            "source": platform.value,
+        })
         return im_session
 
     async def get_latest_by_user(self, platform: IMPlatform, user_id: str) -> Optional[IMChatSession]:

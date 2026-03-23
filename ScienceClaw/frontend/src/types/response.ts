@@ -31,6 +31,7 @@ export interface ListSessionItem {
     is_shared: boolean;
     mode: string;
     pinned?: boolean;
+    source?: string | null;
 }
 
 export interface ListSessionResponse {

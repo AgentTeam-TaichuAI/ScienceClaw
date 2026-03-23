@@ -11,6 +11,7 @@ class IMPlatform(Enum):
     WECOM = "wecom"
     DINGTALK = "dingtalk"
     SLACK = "slack"
+    WECHAT = "wechat"
 
 
 @dataclass

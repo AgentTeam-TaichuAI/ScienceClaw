@@ -22,3 +22,4 @@ deepagents==0.4.4
 langchain-mcp-adapters
 tooluniverse
 lark-oapi
+qrcode>=8.0

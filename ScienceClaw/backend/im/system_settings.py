@@ -19,6 +19,7 @@ class IMSystemSettings(BaseModel):
     lark_enabled: bool = False
     lark_app_id: str = ""
     lark_app_secret: str = ""
+    wechat_enabled: bool = False
     im_progress_mode: str = Field(default="card_entity")
     im_progress_detail_level: str = Field(default="detailed")
     im_progress_interval_ms: int = Field(default=1200, ge=300, le=10000)
@@ -32,6 +33,7 @@ class UpdateIMSystemSettingsRequest(BaseModel):
     lark_enabled: Optional[bool] = None
     lark_app_id: Optional[str] = None
     lark_app_secret: Optional[str] = None
+    wechat_enabled: Optional[bool] = None
     im_progress_mode: Optional[str] = None
     im_progress_detail_level: Optional[str] = None
     im_progress_interval_ms: Optional[int] = Field(default=None, ge=300, le=10000)
@@ -108,6 +110,7 @@ def to_public_settings_dict(im_settings: IMSystemSettings) -> dict:
         "lark_app_id": im_settings.lark_app_id,
         "has_lark_app_secret": bool(im_settings.lark_app_secret),
         "lark_app_secret_masked": "********" if im_settings.lark_app_secret else "",
+        "wechat_enabled": im_settings.wechat_enabled,
         "im_progress_mode": im_settings.im_progress_mode,
         "im_progress_detail_level": im_settings.im_progress_detail_level,
         "im_progress_interval_ms": im_settings.im_progress_interval_ms,

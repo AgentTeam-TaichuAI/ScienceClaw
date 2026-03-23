@@ -271,6 +271,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import LoadingIndicator from '@/components/ui/LoadingIndicator.vue';
 import { listModels, type ModelConfig } from '../api/models';
 import { useSettingsDialog } from '../composables/useSettingsDialog';
+import { useSessionNotifications } from '../composables/useSessionNotifications';
 import { consumePendingChat } from '../composables/usePendingChat';
 
 import { useMessageGrouper } from '../composables/useMessageGrouper';
@@ -284,6 +285,7 @@ const { shared } = useSessionFileList()
 const { hideFilePanel, showFileListPanel } = useFilePanel()
 const { currentUser } = useAuth()
 const { updateSessionTitle } = useSessionListUpdate()
+const { onSessionUpdated } = useSessionNotifications()
 
 // Models related state
 const models = ref<ModelConfig[]>([]);
@@ -439,6 +441,7 @@ const _streamingMsgIndex = ref<number | null>(null);
 // Set to true when the component unmounts; async callbacks check this
 // to avoid mutating dead state after the user navigated away.
 let _unmounted = false;
+const _processedEventIds = new Set<string>();
 
 // Handle message_chunk event (token-by-token streaming)
 const handleMessageChunkEvent = (data: any) => {
@@ -811,6 +814,10 @@ const handlePlanEvent = (planData: PlanEventData) => {
 
 // Main event handler function
 const handleEvent = (event: AgentSSEEvent) => {
+  const eid = event.data?.event_id;
+  if (eid && _processedEventIds.has(eid)) return;
+  if (eid) _processedEventIds.add(eid);
+
   if (event.event === 'message_chunk') {
     handleMessageChunkEvent(event.data);
   } else if (event.event === 'message_chunk_done') {
@@ -1005,6 +1012,7 @@ const chat = async (message: string = '', files: FileInfo[] = [], reconnect: boo
 }
 
 const restoreSession = async () => {
+  _processedEventIds.clear();
   console.log('[restoreSession] start, sessionId:', sessionId.value, '_unmounted:', _unmounted);
   if (!sessionId.value) {
     showErrorToast(t('Session not found'));
@@ -1099,6 +1107,22 @@ const restoreSession = async () => {
         restoreSession();
       }
     }
+
+  onSessionUpdated(({ session_id, session_event }) => {
+    if (!sessionId.value || session_id !== sessionId.value || _unmounted) return;
+    if (session_event) {
+      if (session_event.event === 'message' && session_event.data?.role === 'user') {
+        isLoading.value = true;
+        lastTurnHadError.value = false;
+        selectedActivityTurn.value = -1;
+        activityItems.value = [];
+        pendingToolCallIds.value = [];
+        activityPanelRef.value?.show();
+      }
+      handleEvent(session_event as any);
+      return;
+    }
+  });
 
   // Load models
   const modelsData = await listModels().catch(err => {
