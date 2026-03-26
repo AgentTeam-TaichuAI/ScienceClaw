@@ -1,243 +1,300 @@
 <template>
   <div class="flex flex-col gap-4 w-full">
-    <!-- Description -->
-    <p class="text-sm text-[var(--text-tertiary)]">{{ t('Manage webhook notification channels') }}</p>
+    <p class="text-sm text-[var(--text-tertiary)]">
+      Manage task notification channels for Feishu, DingTalk, WeCom, and Telegram.
+    </p>
 
-    <!-- Loading -->
     <div v-if="loading" class="flex justify-center py-8">
-      <div class="animate-pulse text-[var(--text-tertiary)]">{{ t('Loading...') }}</div>
+      <div class="animate-pulse text-[var(--text-tertiary)]">Loading...</div>
     </div>
 
     <template v-else>
-      <!-- Webhook list -->
       <div
-        v-for="wh in webhooks"
-        :key="wh.id"
+        v-for="webhook in webhooks"
+        :key="webhook.id"
         class="w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-[#f8f9fb] dark:bg-[#111] p-4"
       >
-        <!-- View mode -->
-        <template v-if="editingId !== wh.id">
+        <template v-if="editingId !== webhook.id">
           <div class="flex items-center justify-between gap-3">
-            <div class="flex items-center gap-2.5 min-w-0 flex-1">
-              <component :is="typeIcon(wh.type)" :size="16" class="flex-shrink-0" :class="typeColor(wh.type)" />
-              <span class="font-medium text-[var(--text-primary)] truncate">{{ wh.name }}</span>
-              <span class="text-xs px-2 py-0.5 rounded-full bg-gray-200 dark:bg-gray-700 text-[var(--text-tertiary)]">{{ typeLabel(wh.type) }}</span>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2.5">
+                <span class="font-medium text-[var(--text-primary)] truncate">{{ webhook.name }}</span>
+                <span class="text-xs px-2 py-0.5 rounded-full bg-gray-200 dark:bg-gray-700 text-[var(--text-tertiary)]">
+                  {{ typeLabel(webhook.type) }}
+                </span>
+              </div>
+              <p class="text-xs text-[var(--text-tertiary)] mt-1.5 truncate">{{ describeWebhook(webhook) }}</p>
             </div>
-            <div class="flex items-center gap-1.5 flex-shrink-0">
-              <button @click="handleTest(wh)" :disabled="testingId === wh.id"
-                class="text-xs px-2.5 py-1 rounded-lg border border-blue-500 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-50 transition-colors">
-                {{ testingId === wh.id ? t('Sending...') : t('Test') }}
+            <div class="flex items-center gap-1.5 shrink-0">
+              <button
+                @click="handleTest(webhook)"
+                :disabled="testingId === webhook.id"
+                class="text-xs px-2.5 py-1 rounded-lg border border-blue-500 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-50 transition-colors"
+              >
+                {{ testingId === webhook.id ? 'Sending...' : 'Test' }}
               </button>
-              <button @click="startEdit(wh)" class="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
-                <Pencil :size="14" />
+              <button @click="startEdit(webhook)" class="px-2.5 py-1 rounded-lg text-xs border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800">
+                Edit
               </button>
-              <button @click="handleDelete(wh)" class="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-500 transition-colors">
-                <Trash2 :size="14" />
+              <button @click="handleDelete(webhook)" class="px-2.5 py-1 rounded-lg text-xs border border-red-200 text-red-500 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-900/20">
+                Delete
               </button>
             </div>
           </div>
-          <p class="text-xs text-[var(--text-tertiary)] mt-1.5 truncate">{{ wh.url }}</p>
         </template>
 
-        <!-- Edit mode -->
         <template v-else>
           <div class="space-y-3">
             <div class="flex gap-2">
-              <input v-model="editForm.name" type="text" :placeholder="t('Webhook name')"
-                class="flex-1 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1e1e1e] text-sm text-[var(--text-primary)] focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500" />
-              <select v-model="editForm.type"
-                class="px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1e1e1e] text-sm text-[var(--text-primary)] focus:ring-2 focus:ring-blue-500/30">
-                <option value="feishu">{{ t('Feishu') }}</option>
-                <option value="dingtalk">{{ t('DingTalk') }}</option>
-                <option value="wecom">{{ t('WeCom') }}</option>
+              <input v-model="editForm.name" type="text" placeholder="Channel name" class="flex-1 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1e1e1e] text-sm text-[var(--text-primary)] focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500" />
+              <select v-model="editForm.type" class="w-40 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1e1e1e] text-sm text-[var(--text-primary)] focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500">
+                <option value="feishu">Feishu</option>
+                <option value="dingtalk">DingTalk</option>
+                <option value="wecom">WeCom</option>
+                <option value="telegram">Telegram</option>
               </select>
             </div>
-            <input v-model="editForm.url" type="url" :placeholder="t('Webhook URL')"
-              class="w-full px-3 py-2 rounded-lg border text-sm text-[var(--text-primary)] focus:ring-2 focus:ring-blue-500/30"
-              :class="editUrlError ? 'border-red-400 dark:border-red-500 bg-red-50/50 dark:bg-red-900/10' : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1e1e1e] focus:border-blue-500'"
-              @input="editUrlError = ''" />
-            <p v-if="editUrlError" class="text-xs text-red-500 flex items-center gap-1">
-              <AlertTriangle :size="12" /> {{ editUrlError }}
-            </p>
+
+            <template v-if="usesLegacyUrl(editForm.type)">
+              <input v-model="editForm.url" type="url" placeholder="Webhook URL" class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1e1e1e] text-sm text-[var(--text-primary)] focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500" />
+            </template>
+            <template v-else>
+              <input v-model="editForm.config.chat_id" type="text" placeholder="Telegram chat id" class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1e1e1e] text-sm text-[var(--text-primary)] focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500" />
+              <input v-model="editForm.config.bot_token" type="password" placeholder="Leave blank to keep existing bot token" class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1e1e1e] text-sm text-[var(--text-primary)] focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500" />
+            </template>
+
+            <p v-if="editError" class="text-xs text-red-500">{{ editError }}</p>
             <div class="flex gap-2 justify-end">
-              <button @click="cancelEdit(); editUrlError = ''" class="px-3 py-1.5 rounded-lg text-sm text-[var(--text-secondary)] hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
-                {{ t('Cancel') }}
-              </button>
-              <button @click="saveEdit" :disabled="!editForm.name?.trim() || !editForm.url?.trim() || savingEdit"
-                class="px-3 py-1.5 rounded-lg text-sm bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-medium disabled:opacity-50 transition-all">
-                {{ savingEdit ? t('Saving...') : t('Save') }}
+              <button @click="cancelEdit" class="px-3 py-1.5 rounded-lg text-sm text-[var(--text-secondary)] hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">Cancel</button>
+              <button @click="saveEdit" :disabled="savingEdit" class="px-3 py-1.5 rounded-lg text-sm bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-medium disabled:opacity-50 transition-all">
+                {{ savingEdit ? 'Saving...' : 'Save' }}
               </button>
             </div>
           </div>
         </template>
       </div>
 
-      <!-- Empty state -->
-      <div v-if="webhooks.length === 0 && !showCreateForm" class="text-center py-8">
-        <Bell :size="32" class="mx-auto text-[var(--text-tertiary)] mb-3" />
-        <p class="text-[var(--text-tertiary)] text-sm">{{ t('No webhooks configured') }}</p>
+      <div v-if="webhooks.length === 0 && !showCreateForm" class="text-center py-8 text-[var(--text-tertiary)] text-sm">
+        No notification channels configured.
       </div>
 
-      <!-- Create form -->
       <div v-if="showCreateForm" class="w-full rounded-xl border-2 border-dashed border-blue-300 dark:border-blue-700 bg-blue-50/50 dark:bg-blue-900/10 p-4 space-y-3">
-        <p class="text-sm font-medium text-[var(--text-primary)]">{{ t('New webhook') }}</p>
+        <p class="text-sm font-medium text-[var(--text-primary)]">New notification channel</p>
         <div class="flex gap-2">
-          <input v-model="createForm.name" type="text" :placeholder="t('Webhook name')"
-            class="flex-1 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1e1e1e] text-sm text-[var(--text-primary)] focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500" />
-          <select v-model="createForm.type"
-            class="px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1e1e1e] text-sm text-[var(--text-primary)] focus:ring-2 focus:ring-blue-500/30">
-            <option value="feishu">{{ t('Feishu') }}</option>
-            <option value="dingtalk">{{ t('DingTalk') }}</option>
-            <option value="wecom">{{ t('WeCom') }}</option>
+          <input v-model="createForm.name" type="text" placeholder="Channel name" class="flex-1 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1e1e1e] text-sm text-[var(--text-primary)] focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500" />
+          <select v-model="createForm.type" class="w-40 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1e1e1e] text-sm text-[var(--text-primary)] focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500">
+            <option value="feishu">Feishu</option>
+            <option value="dingtalk">DingTalk</option>
+            <option value="wecom">WeCom</option>
+            <option value="telegram">Telegram</option>
           </select>
         </div>
-        <input v-model="createForm.url" type="url" :placeholder="t('Webhook URL')"
-          class="w-full px-3 py-2 rounded-lg border text-sm text-[var(--text-primary)] focus:ring-2 focus:ring-blue-500/30"
-          :class="createUrlError ? 'border-red-400 dark:border-red-500 bg-red-50/50 dark:bg-red-900/10' : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1e1e1e] focus:border-blue-500'"
-          @input="createUrlError = ''" />
-        <p v-if="createUrlError" class="text-xs text-red-500 flex items-center gap-1">
-          <AlertTriangle :size="12" /> {{ createUrlError }}
-        </p>
+        <template v-if="usesLegacyUrl(createForm.type)">
+          <input v-model="createForm.url" type="url" placeholder="Webhook URL" class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1e1e1e] text-sm text-[var(--text-primary)] focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500" />
+        </template>
+        <template v-else>
+          <input v-model="createForm.config.chat_id" type="text" placeholder="Telegram chat id" class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1e1e1e] text-sm text-[var(--text-primary)] focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500" />
+          <input v-model="createForm.config.bot_token" type="password" placeholder="Telegram bot token" class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#1e1e1e] text-sm text-[var(--text-primary)] focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500" />
+        </template>
+        <p v-if="createError" class="text-xs text-red-500">{{ createError }}</p>
         <div class="flex gap-2 justify-end">
-          <button @click="showCreateForm = false; createUrlError = ''" class="px-3 py-1.5 rounded-lg text-sm text-[var(--text-secondary)] hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
-            {{ t('Cancel') }}
-          </button>
-          <button @click="handleCreate" :disabled="!createForm.name?.trim() || !createForm.url?.trim() || creating"
-            class="px-3 py-1.5 rounded-lg text-sm bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-medium disabled:opacity-50 transition-all">
-            {{ creating ? t('Creating...') : t('Create') }}
+          <button @click="resetCreateForm" class="px-3 py-1.5 rounded-lg text-sm text-[var(--text-secondary)] hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">Cancel</button>
+          <button @click="handleCreate" :disabled="creating" class="px-3 py-1.5 rounded-lg text-sm bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-medium disabled:opacity-50 transition-all">
+            {{ creating ? 'Creating...' : 'Create' }}
           </button>
         </div>
       </div>
 
-      <!-- Add button -->
-      <button @click="showCreateForm = true" v-if="!showCreateForm"
-        class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-gray-300 dark:border-gray-600 text-[var(--text-secondary)] hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors text-sm">
-        <Plus :size="16" />
-        {{ t('Add webhook') }}
+      <button
+        v-if="!showCreateForm"
+        @click="showCreateForm = true"
+        class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-gray-300 dark:border-gray-600 text-[var(--text-secondary)] hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors text-sm"
+      >
+        Add notification channel
       </button>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, markRaw } from 'vue';
-import { useI18n } from 'vue-i18n';
-import { Pencil, Trash2, Plus, Bell, MessageSquare, Send, AlertTriangle } from 'lucide-vue-next';
-import { listWebhooks, createWebhook, updateWebhook, deleteWebhook, testWebhook } from '@/api/webhooks';
-import type { Webhook } from '@/api/webhooks';
-import { showSuccessToast, showErrorToast } from '@/utils/toast';
+import { onMounted, ref } from 'vue';
+import { createWebhook, deleteWebhook, listWebhooks, testWebhook, updateWebhook, type Webhook, type WebhookType } from '@/api/webhooks';
+import { showErrorToast, showSuccessToast } from '@/utils/toast';
 
-const { t } = useI18n();
-const webhooks = ref<Webhook[]>([]);
+type EditableWebhookForm = {
+  name: string;
+  type: WebhookType;
+  url: string;
+  config: {
+    chat_id: string;
+    bot_token: string;
+  };
+};
+
 const loading = ref(true);
+const webhooks = ref<Webhook[]>([]);
 const showCreateForm = ref(false);
 const creating = ref(false);
 const editingId = ref<string | null>(null);
 const savingEdit = ref(false);
 const testingId = ref<string | null>(null);
+const createError = ref('');
+const editError = ref('');
 
-const createForm = ref({ name: '', type: 'feishu', url: '' });
-const editForm = ref({ name: '', type: 'feishu', url: '' });
-const createUrlError = ref('');
-const editUrlError = ref('');
+const createForm = ref<EditableWebhookForm>(emptyForm());
+const editForm = ref<EditableWebhookForm>(emptyForm());
 
-function detectTypeFromUrl(url: string): string | null {
-  if (!url) return null;
-  try {
-    const host = new URL(url).hostname;
-    if (host.includes('feishu.cn') || host.includes('larksuite.com')) return 'feishu';
-    if (host.includes('dingtalk.com') || host.includes('dingtalk.cn')) return 'dingtalk';
-    if (host.includes('weixin.qq.com') || host.includes('qyapi.weixin.qq.com')) return 'wecom';
-  } catch { /* invalid URL */ }
-  return null;
+function emptyForm(): EditableWebhookForm {
+  return {
+    name: '',
+    type: 'feishu',
+    url: '',
+    config: {
+      chat_id: '',
+      bot_token: '',
+    },
+  };
 }
 
-const TYPE_NAMES: Record<string, string> = { feishu: '飞书', dingtalk: '钉钉', wecom: '企微' };
+function usesLegacyUrl(type: WebhookType): boolean {
+  return type === 'feishu' || type === 'dingtalk' || type === 'wecom';
+}
 
-function validateUrlType(url: string, selectedType: string): string {
-  const detected = detectTypeFromUrl(url);
-  if (detected && detected !== selectedType) {
-    return t('URL type mismatch', { detected: TYPE_NAMES[detected] || detected, selected: TYPE_NAMES[selectedType] || selectedType });
+function typeLabel(type: WebhookType): string {
+  return {
+    feishu: 'Feishu',
+    dingtalk: 'DingTalk',
+    wecom: 'WeCom',
+    telegram: 'Telegram',
+  }[type];
+}
+
+function describeWebhook(webhook: Webhook): string {
+  if (webhook.type === 'telegram') {
+    return `chat_id: ${webhook.config?.chat_id || '-'} | token: ${webhook.config?.has_bot_token ? 'configured' : 'missing'}`;
+  }
+  return webhook.url;
+}
+
+function formFromWebhook(webhook: Webhook): EditableWebhookForm {
+  return {
+    name: webhook.name,
+    type: webhook.type,
+    url: webhook.url || '',
+    config: {
+      chat_id: webhook.type === 'telegram' ? String(webhook.config?.chat_id || '') : '',
+      bot_token: '',
+    },
+  };
+}
+
+function validateForm(form: EditableWebhookForm, requireTokenForTelegram: boolean): string {
+  if (!form.name.trim()) return 'Channel name is required';
+  if (usesLegacyUrl(form.type) && !form.url.trim()) return 'Webhook URL is required';
+  if (form.type === 'telegram') {
+    if (!form.config.chat_id.trim()) return 'Telegram chat id is required';
+    if (requireTokenForTelegram && !form.config.bot_token.trim()) return 'Telegram bot token is required';
   }
   return '';
 }
-
-const TYPE_LABELS: Record<string, string> = { feishu: '飞书', dingtalk: '钉钉', wecom: '企微' };
-const typeLabel = (t: string) => TYPE_LABELS[t] || t;
-const typeColor = (t: string) => t === 'feishu' ? 'text-blue-500' : t === 'dingtalk' ? 'text-sky-500' : 'text-green-500';
-const typeIcon = (_t: string) => markRaw(MessageSquare);
 
 async function loadWebhooks() {
   loading.value = true;
   try {
     webhooks.value = await listWebhooks();
-  } catch { webhooks.value = []; }
-  finally { loading.value = false; }
+  } catch {
+    webhooks.value = [];
+  } finally {
+    loading.value = false;
+  }
+}
+
+function resetCreateForm() {
+  showCreateForm.value = false;
+  createError.value = '';
+  createForm.value = emptyForm();
 }
 
 async function handleCreate() {
-  createUrlError.value = validateUrlType(createForm.value.url, createForm.value.type);
-  if (createUrlError.value) return;
+  createError.value = validateForm(createForm.value, createForm.value.type === 'telegram');
+  if (createError.value) return;
   creating.value = true;
   try {
-    await createWebhook(createForm.value);
-    showCreateForm.value = false;
-    createForm.value = { name: '', type: 'feishu', url: '' };
-    createUrlError.value = '';
+    await createWebhook({
+      name: createForm.value.name.trim(),
+      type: createForm.value.type,
+      url: usesLegacyUrl(createForm.value.type) ? createForm.value.url.trim() : '',
+      config: createForm.value.type === 'telegram'
+        ? { chat_id: createForm.value.config.chat_id.trim(), bot_token: createForm.value.config.bot_token.trim() }
+        : undefined,
+    });
+    resetCreateForm();
     await loadWebhooks();
-    showSuccessToast(t('Webhook created'));
+    showSuccessToast('Notification channel created');
   } catch (e: any) {
-    showErrorToast(e?.response?.data?.detail || t('Create failed'));
-  } finally { creating.value = false; }
+    showErrorToast(e?.response?.data?.detail || 'Create failed');
+  } finally {
+    creating.value = false;
+  }
 }
 
-function startEdit(wh: Webhook) {
-  editingId.value = wh.id;
-  editForm.value = { name: wh.name, type: wh.type, url: wh.url };
+function startEdit(webhook: Webhook) {
+  editingId.value = webhook.id;
+  editError.value = '';
+  editForm.value = formFromWebhook(webhook);
 }
 
 function cancelEdit() {
   editingId.value = null;
+  editError.value = '';
 }
 
 async function saveEdit() {
   if (!editingId.value) return;
-  editUrlError.value = validateUrlType(editForm.value.url, editForm.value.type);
-  if (editUrlError.value) return;
+  editError.value = validateForm(editForm.value, false);
+  if (editError.value) return;
   savingEdit.value = true;
   try {
-    await updateWebhook(editingId.value, editForm.value);
-    editingId.value = null;
-    editUrlError.value = '';
+    await updateWebhook(editingId.value, {
+      name: editForm.value.name.trim(),
+      type: editForm.value.type,
+      url: usesLegacyUrl(editForm.value.type) ? editForm.value.url.trim() : '',
+      config: editForm.value.type === 'telegram'
+        ? { chat_id: editForm.value.config.chat_id.trim(), bot_token: editForm.value.config.bot_token.trim() }
+        : {},
+    });
+    cancelEdit();
     await loadWebhooks();
-    showSuccessToast(t('Webhook updated'));
+    showSuccessToast('Notification channel updated');
   } catch (e: any) {
-    showErrorToast(e?.response?.data?.detail || t('Save failed'));
-  } finally { savingEdit.value = false; }
-}
-
-async function handleDelete(wh: Webhook) {
-  if (!window.confirm(t('Are you sure you want to delete this webhook?'))) return;
-  try {
-    await deleteWebhook(wh.id);
-    await loadWebhooks();
-    showSuccessToast(t('Webhook deleted'));
-  } catch (e: any) {
-    showErrorToast(e?.response?.data?.detail || t('Delete failed'));
+    showErrorToast(e?.response?.data?.detail || 'Save failed');
+  } finally {
+    savingEdit.value = false;
   }
 }
 
-async function handleTest(wh: Webhook) {
-  testingId.value = wh.id;
+async function handleDelete(webhook: Webhook) {
+  if (!window.confirm(`Delete ${webhook.name}?`)) return;
   try {
-    const res = await testWebhook(wh.id);
-    showSuccessToast(res.message || t('Test message sent'));
+    await deleteWebhook(webhook.id);
+    await loadWebhooks();
+    showSuccessToast('Notification channel deleted');
   } catch (e: any) {
-    showErrorToast(e?.response?.data?.detail || t('Test failed'));
-  } finally { testingId.value = null; }
+    showErrorToast(e?.response?.data?.detail || 'Delete failed');
+  }
 }
 
-defineExpose({ loadWebhooks });
+async function handleTest(webhook: Webhook) {
+  testingId.value = webhook.id;
+  try {
+    const result = await testWebhook(webhook.id);
+    showSuccessToast(result.message || 'Test message sent');
+  } catch (e: any) {
+    showErrorToast(e?.response?.data?.detail || 'Test failed');
+  } finally {
+    testingId.value = null;
+  }
+}
 
 onMounted(loadWebhooks);
 </script>

@@ -80,6 +80,8 @@ services:
     build:
       context: ./ScienceClaw/backend
     image: scienceclaw-backend:local
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./ScienceClaw/backend:/app/backend
       - ./ScienceClaw/backend/builtin_skills:/app/builtin_skills:ro
@@ -121,6 +123,12 @@ services:
       LARK_ENABLED: "true"
       LARK_APP_ID: ${LARK_APP_ID-}
       LARK_APP_SECRET: ${LARK_APP_SECRET-}
+      TELEGRAM_ENABLED: ${TELEGRAM_ENABLED-false}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN-}
+      TELEGRAM_INGRESS_MODE: ${TELEGRAM_INGRESS_MODE-polling}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET-}
+      TELEGRAM_PUBLIC_BASE_URL: ${TELEGRAM_PUBLIC_BASE_URL-}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL-}
     ports:
       - "12001:8000"
     command: >
@@ -145,6 +153,8 @@ services:
       context: ScienceClaw/task-service
       dockerfile: Dockerfile
     image: scienceclaw-task-service:local
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       TZ: Asia/Shanghai
       DISPLAY_TIMEZONE: ${DISPLAY_TIMEZONE:-Asia/Shanghai}
@@ -174,6 +184,8 @@ services:
   celery_worker:
     image: scienceclaw-task-service:local
     pull_policy: never
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       TZ: Asia/Shanghai
       MONGODB_HOST: mongo
@@ -197,6 +209,8 @@ services:
   celery_beat:
     image: scienceclaw-task-service:local
     pull_policy: never
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       TZ: Asia/Shanghai
       MONGODB_HOST: mongo
@@ -242,7 +256,32 @@ services:
       scheduler_api:
         condition: service_started
 
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      CADDY_SITE_ADDRESS: ${CADDY_SITE_ADDRESS:-:80}
+      BACKEND_UPSTREAM: backend:8000
+      TASK_SERVICE_UPSTREAM: scheduler_api:8001
+      FRONTEND_UPSTREAM: frontend:5173
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - scienceclaw_caddy_data:/data
+      - scienceclaw_caddy_config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+      scheduler_api:
+        condition: service_started
+      frontend:
+        condition: service_started
+
 volumes:
   scienceclaw_mongo_data:
   scienceclaw_frontend_node_modules:
   scienceclaw_frontend_npm_cache:
+  scienceclaw_caddy_data:
+  scienceclaw_caddy_config:

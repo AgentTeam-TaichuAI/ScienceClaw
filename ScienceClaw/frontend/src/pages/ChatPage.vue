@@ -286,6 +286,10 @@ const { hideFilePanel, showFileListPanel } = useFilePanel()
 const { currentUser } = useAuth()
 const { updateSessionTitle } = useSessionListUpdate()
 const { onSessionUpdated } = useSessionNotifications()
+const sessionSource = ref<string | null>(null);
+const IM_PASSIVE_SYNC_INTERVAL_MS = 2000;
+let imPassiveSyncTimer: ReturnType<typeof setInterval> | null = null;
+let imPassiveSyncInFlight = false;
 
 // Models related state
 const models = ref<ModelConfig[]>([]);
@@ -489,7 +493,7 @@ const handleMessageEvent = (messageData: MessageEventData) => {
     } as MessageContent,
   });
 
-  if (messageData.attachments?.length > 0) {
+  if (messageData.role === 'user' && messageData.attachments?.length > 0) {
     const normalizedAttachments = messageData.attachments.map((att: any) => {
       if (typeof att === 'string') {
         const filename = att.split('/').pop() || att;
@@ -559,7 +563,7 @@ const handleToolEvent = (toolData: ToolEventData) => {
   // Sync with plan: associate tool with the currently running step
   let associatedWithStep = false;
   if (plan.value) {
-    const runningStep = plan.value.steps.find(s => s.status === 'running');
+    const runningStep = plan.value.steps.find(s => s.status === 'running' || s.status === 'in_progress');
     if (runningStep) {
       if (!runningStep.tools) {
         runningStep.tools = [];
@@ -585,7 +589,7 @@ const handleToolEvent = (toolData: ToolEventData) => {
     // Smart merge: called event enriches calling event without overwriting args
     smartMerge(lastTool.value, toolContent);
   } else {
-    if (lastStep?.status === 'running') {
+    if (lastStep?.status === 'running' || lastStep?.status === 'in_progress') {
       lastStep.tools.push(toolContent);
     } else {
       messages.value.push({
@@ -646,7 +650,7 @@ const flushPendingToolsToStep = (planStep: StepEventData) => {
 // Find the best step to flush pending tools into (running > completed > first)
 const findBestStepForFlush = (): StepEventData | undefined => {
   if (!plan.value?.steps.length) return undefined;
-  return plan.value.steps.find(s => s.status === 'running')
+  return plan.value.steps.find(s => s.status === 'running' || s.status === 'in_progress')
     || plan.value.steps.find(s => s.status === 'completed')
     || plan.value.steps[0];
 };
@@ -662,14 +666,14 @@ const handleStepEvent = (stepData: StepEventData) => {
       planStep.status = stepData.status;
 
       // When a step becomes running or completed, retroactively associate any buffered tools
-      if (pendingToolCallIds.value.length > 0 && (stepData.status === 'running' || stepData.status === 'completed')) {
+      if (pendingToolCallIds.value.length > 0 && (stepData.status === 'running' || stepData.status === 'in_progress' || stepData.status === 'completed')) {
         flushPendingToolsToStep(planStep);
         plan.value = { ...plan.value };
       }
     }
   }
 
-  if (stepData.status === 'running') {
+  if (stepData.status === 'running' || stepData.status === 'in_progress') {
     messages.value.push({
       type: 'step',
       content: {
@@ -710,8 +714,29 @@ const handleThinkingEvent = (thinkingData: ThinkingEventData) => {
 const handleDoneEvent = (doneData: DoneEventData) => {
   _streamingMsgIndex.value = null;
   isLoading.value = false;
+  if (plan.value?.steps?.length) {
+    for (const step of plan.value.steps) {
+      if (step.status !== 'completed' && step.status !== 'failed') {
+        step.status = doneData.status === 'failed' ? 'failed' : 'completed';
+      }
+    }
+    plan.value = { ...plan.value };
+  }
 
   // 将统计信息和本轮文件列表附加到最后一条 assistant 消息
+  const shouldAppendFailureMessage = doneData.status === 'failed' && !!doneData.error && !lastTurnHadError.value;
+  if (doneData.status === 'failed') {
+    lastTurnHadError.value = true;
+  }
+  if (shouldAppendFailureMessage) {
+    messages.value.push({
+      type: 'assistant',
+      content: {
+        content: doneData.error as string,
+        timestamp: doneData.timestamp,
+      } as MessageContent,
+    });
+  }
   if (doneData.statistics || doneData.round_files?.length) {
     for (let i = messages.value.length - 1; i >= 0; i--) {
       if (messages.value[i].type === 'assistant') {
@@ -866,6 +891,86 @@ const handleSubmit = () => {
   chat(inputMessage.value, attachments.value);
 }
 
+const getEventsAfterCursor = (events: AgentSSEEvent[], cursor?: string) => {
+  if (!cursor) return events;
+  const replay: AgentSSEEvent[] = [];
+  let foundCursor = false;
+  for (const event of events || []) {
+    const eventId = (event?.data as any)?.event_id;
+    if (!foundCursor) {
+      if (eventId === cursor) {
+        foundCursor = true;
+      }
+      continue;
+    }
+    replay.push(event);
+  }
+  return replay;
+};
+
+const stopImPassiveSync = () => {
+  if (imPassiveSyncTimer) {
+    clearInterval(imPassiveSyncTimer);
+    imPassiveSyncTimer = null;
+  }
+};
+
+const syncImSession = async () => {
+  if (!sessionId.value || _unmounted || sessionSource.value !== 'im' || imPassiveSyncInFlight) {
+    return;
+  }
+  if (typeof document !== 'undefined' && document.hidden) {
+    return;
+  }
+
+  const targetSessionId = sessionId.value;
+  imPassiveSyncInFlight = true;
+  try {
+    const session = await agentApi.getSession(targetSessionId);
+    if (_unmounted || sessionId.value !== targetSessionId) {
+      return;
+    }
+
+    sessionSource.value = session.source || null;
+    if (session.title && session.title !== title.value) {
+      title.value = session.title;
+      updateSessionTitle(targetSessionId, session.title);
+    }
+    if (session.model_config_id && session.model_config_id !== selectedModelId.value) {
+      selectedModelId.value = session.model_config_id;
+    }
+
+    const newEvents = getEventsAfterCursor(session.events || [], lastEventId.value);
+    if (newEvents.length > 0) {
+      for (const event of newEvents) {
+        if (_unmounted || sessionId.value !== targetSessionId) {
+          return;
+        }
+        handleEvent(event);
+      }
+      agentApi.clearUnreadMessageCount(targetSessionId).catch(() => {});
+    }
+
+    isLoading.value = session.status === SessionStatus.RUNNING || session.status === SessionStatus.PENDING;
+  } catch (error) {
+    console.error('[syncImSession] failed:', error);
+  } finally {
+    imPassiveSyncInFlight = false;
+  }
+};
+
+const startImPassiveSync = () => {
+  if (sessionSource.value !== 'im') {
+    stopImPassiveSync();
+    return;
+  }
+  stopImPassiveSync();
+  void syncImSession();
+  imPassiveSyncTimer = setInterval(() => {
+    void syncImSession();
+  }, IM_PASSIVE_SYNC_INTERVAL_MS);
+};
+
 const chat = async (message: string = '', files: FileInfo[] = [], reconnect: boolean = false) => {
   console.log('[chat] called, sessionId:', sessionId.value, 'reconnect:', reconnect, 'message:', message?.slice(0, 30), 'files:', files?.length, '_unmounted:', _unmounted);
   if (!sessionId.value || _unmounted) { console.log('[chat] aborted: no sessionId or unmounted'); return; }
@@ -1014,6 +1119,7 @@ const chat = async (message: string = '', files: FileInfo[] = [], reconnect: boo
 const restoreSession = async () => {
   _processedEventIds.clear();
   console.log('[restoreSession] start, sessionId:', sessionId.value, '_unmounted:', _unmounted);
+  stopImPassiveSync();
   if (!sessionId.value) {
     showErrorToast(t('Session not found'));
     router.replace('/');
@@ -1040,6 +1146,7 @@ const restoreSession = async () => {
 
   if (isStale()) { console.log('[restoreSession] stale after load, aborting'); return; }
 
+  sessionSource.value = session.source || null;
   if (session.title) {
     title.value = session.title;
     updateSessionTitle(sessionId.value, session.title);
@@ -1060,7 +1167,10 @@ const restoreSession = async () => {
 
   if (isStale()) return;
 
-  if (session.status === SessionStatus.RUNNING || session.status === SessionStatus.PENDING) {
+  if (sessionSource.value === 'im') {
+    isLoading.value = session.status === SessionStatus.RUNNING || session.status === SessionStatus.PENDING;
+    startImPassiveSync();
+  } else if (session.status === SessionStatus.RUNNING || session.status === SessionStatus.PENDING) {
     const hasEvents = session.events && session.events.length > 0;
     if (!hasEvents && session.status === SessionStatus.PENDING) {
       console.log('[restoreSession] PENDING with no events, idle');
@@ -1160,6 +1270,7 @@ watch(isSettingsDialogOpen, async (newVal, oldVal) => {
 onUnmounted(() => {
   console.log('[ChatPage] onUnmounted, sessionId:', sessionId.value);
   _unmounted = true;
+  stopImPassiveSync();
   if (cancelCurrentChat.value) {
     cancelCurrentChat.value();
     cancelCurrentChat.value = null;

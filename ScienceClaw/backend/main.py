@@ -50,7 +50,7 @@ async def lifespan(app: FastAPI):
     try:
         await start_im_runtime()
     except Exception as e:
-        logger.error(f"Failed to start lark long connection: {e}")
+        logger.error(f"Failed to start IM runtime: {e}")
     yield
     try:
         await graceful_shutdown_agents()
@@ -59,7 +59,7 @@ async def lifespan(app: FastAPI):
     try:
         await stop_im_runtime()
     except Exception as e:
-        logger.error(f"Failed to stop lark long connection: {e}")
+        logger.error(f"Failed to stop IM runtime: {e}")
     await db.close()
 
 

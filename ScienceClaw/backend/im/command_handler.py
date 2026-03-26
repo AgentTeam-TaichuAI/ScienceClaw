@@ -25,6 +25,8 @@ class IMCommandHandler:
         science_user_id: str,
     ) -> CommandResult:
         cmd = (command or "").strip().split()[0].lower()
+        if cmd == "/start":
+            cmd = "/help"
         if cmd == "/help":
             return CommandResult(
                 response=IMResponse(
@@ -32,21 +34,24 @@ class IMCommandHandler:
                     content=(
                         "可用命令：\n"
                         "/help - 查看帮助\n"
-                        "/new - 新建会话\n"
+                        "/new - 新建当前会话\n"
                         "/history - 最近会话\n"
                         "/status - 当前状态\n"
                         "/bind - 查看绑定说明\n"
-                        "/unbind - 解除绑定"
+                        "/unbind - 查看解绑说明"
                     ),
                 ),
                 should_stop=True,
             )
 
         if cmd == "/new":
+            context = await self.session_manager.resolve_context(message=message, bound_science_user_id=science_user_id)
             created = await self.session_manager.create_new_session(
                 platform=message.platform,
-                platform_chat_id=message.chat.chat_id,
-                user_id=science_user_id,
+                conversation_scope_id=context.conversation_scope_id,
+                platform_chat_id=context.platform_chat_id,
+                user_id=context.science_user_id,
+                session_mode=context.session_mode,
             )
             return CommandResult(
                 response=IMResponse(
@@ -72,13 +77,27 @@ class IMCommandHandler:
             )
 
         if cmd == "/status":
-            latest = await self.session_manager.get_latest_by_user(
+            context = await self.session_manager.resolve_context(message=message, bound_science_user_id=science_user_id)
+            current = await self.session_manager.get_current_session(
                 platform=message.platform,
-                user_id=science_user_id,
+                conversation_scope_id=context.conversation_scope_id,
+                platform_chat_id=context.platform_chat_id,
+                user_id=context.science_user_id,
+                session_mode=context.session_mode,
             )
-            content = "当前无活跃会话"
-            if latest:
-                content = f"当前会话：{latest.science_session_id}"
+            if current:
+                if context.session_mode == "shared_topic":
+                    content = f"当前 Topic 会话：{current.science_session_id}"
+                else:
+                    content = f"当前会话：{current.science_session_id}"
+            else:
+                latest = await self.session_manager.get_latest_by_user(
+                    platform=message.platform,
+                    user_id=science_user_id,
+                )
+                content = "当前无活跃会话"
+                if latest:
+                    content = f"最近会话：{latest.science_session_id}"
             return CommandResult(
                 response=IMResponse(content_type="text", content=content),
                 should_stop=True,
@@ -88,7 +107,7 @@ class IMCommandHandler:
             return CommandResult(
                 response=IMResponse(
                     content_type="text",
-                    content="当前账号已绑定，可直接提问。",
+                    content="当前账号已绑定，可直接提问；若需要重新绑定，请到 Web 设置页查看绑定信息。",
                 ),
                 should_stop=True,
             )
@@ -97,7 +116,7 @@ class IMCommandHandler:
             return CommandResult(
                 response=IMResponse(
                     content_type="text",
-                    content="请到 Web 端设置中执行解绑，或调用绑定管理接口。",
+                    content="请到 Web 设置页执行解绑，或调用绑定管理接口。",
                 ),
                 should_stop=True,
             )

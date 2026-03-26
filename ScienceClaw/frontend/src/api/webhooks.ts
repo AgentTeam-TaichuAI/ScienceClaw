@@ -21,25 +21,41 @@ client.interceptors.request.use((config) => {
   return config;
 });
 
+export type WebhookType = 'feishu' | 'dingtalk' | 'wecom' | 'telegram';
+
+export interface TelegramWebhookConfigPublic {
+  chat_id: string;
+  has_bot_token: boolean;
+  bot_token_masked: string;
+}
+
+export interface TelegramWebhookConfigInput {
+  bot_token?: string;
+  chat_id: string;
+}
+
 export interface Webhook {
   id: string;
   name: string;
-  type: 'feishu' | 'dingtalk' | 'wecom';
+  type: WebhookType;
   url: string;
+  config: Record<string, any>;
   created_at?: string;
   updated_at?: string;
 }
 
 export interface WebhookCreatePayload {
   name: string;
-  type: string;
-  url: string;
+  type: WebhookType;
+  url?: string;
+  config?: Record<string, any>;
 }
 
 export interface WebhookUpdatePayload {
   name?: string;
-  type?: string;
+  type?: WebhookType;
   url?: string;
+  config?: Record<string, any>;
 }
 
 export async function listWebhooks(): Promise<Webhook[]> {

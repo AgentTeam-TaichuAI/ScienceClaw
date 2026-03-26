@@ -4,7 +4,8 @@ export enum SessionStatus {
     PENDING = "pending",
     RUNNING = "running",
     WAITING = "waiting",
-    COMPLETED = "completed"
+    COMPLETED = "completed",
+    FAILED = "failed"
 }
 
 export interface CreateSessionResponse {
@@ -19,6 +20,7 @@ export interface GetSessionResponse {
     is_shared: boolean;
     mode: string;
     model_config_id: string | null;
+    source?: string | null;
 }
 
 export interface ListSessionItem {
@@ -71,6 +73,7 @@ export interface SharedSessionResponse {
     status: SessionStatus;
     events: AgentSSEEvent[];
     is_shared: boolean;
+    source?: string | null;
 }
 
 export interface SkillItem {
@@ -92,4 +95,3 @@ export interface ExternalToolItem {
     file: string;
     blocked: boolean;
 }
-  

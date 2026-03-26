@@ -79,6 +79,7 @@ class SessionStatus:
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
+    FAILED = "failed"
 
 
 class ListSessionItem(BaseModel):
@@ -106,6 +107,7 @@ class GetSessionData(BaseModel):
     is_shared: bool = Field(default=False, description="Whether shared")
     mode: str = Field(default="deep", description="Session mode")
     model_config_id: Optional[str] = Field(default=None, description="Model config ID")
+    source: Optional[str] = Field(default=None, description="Session source, e.g. 'im'")
 
 
 class ChatRequest(BaseModel):
@@ -164,6 +166,13 @@ def _append_session_event(session: Any, event: Dict[str, Any]) -> None:
         if isinstance(content, str) and content.strip():
             setattr(session, "latest_message", content)
             setattr(session, "latest_message_at", int(data.get("timestamp") or _now_ts()))
+    elif event.get("event") == "error":
+        data = event.get("data") or {}
+        error = data.get("error")
+        if isinstance(error, str) and error.strip():
+            trimmed = error[:500] if len(error) > 500 else error
+            setattr(session, "latest_message", trimmed)
+            setattr(session, "latest_message_at", int(data.get("timestamp") or _now_ts()))
 
 
 def _count_user_messages(events: List[Dict[str, Any]]) -> int:
@@ -174,6 +183,98 @@ def _count_user_messages(events: List[Dict[str, Any]]) -> int:
         1 for ev in events
         if ev.get("event") == "message" and (ev.get("data") or {}).get("role") == "user"
     )
+
+
+def _events_after_cursor(events: List[Dict[str, Any]], cursor: Optional[str]) -> List[Dict[str, Any]]:
+    if not cursor:
+        return list(events or [])
+    found_cursor = False
+    replay: List[Dict[str, Any]] = []
+    for evt in list(events or []):
+        evt_data = evt.get("data", {}) or {}
+        if not found_cursor:
+            if evt_data.get("event_id") == cursor:
+                found_cursor = True
+            continue
+        replay.append(evt)
+    return replay
+
+
+def _extract_tool_error_message(content: Any) -> Optional[str]:
+    if isinstance(content, dict):
+        error = content.get("error")
+        if isinstance(error, str) and error.strip():
+            return error.strip()
+        return None
+
+    if isinstance(content, str):
+        text = content.strip()
+        if not text:
+            return None
+        try:
+            parsed = json.loads(text)
+        except (TypeError, json.JSONDecodeError):
+            parsed = None
+        if isinstance(parsed, dict):
+            error = parsed.get("error")
+            if isinstance(error, str) and error.strip():
+                return error.strip()
+        match = re.search(r'"error"\s*:\s*"([^"]+)"', text)
+        if match:
+            return match.group(1).strip()
+    return None
+
+
+def _round_has_pdf(round_files: List[Dict[str, Any]]) -> bool:
+    for file_info in round_files or []:
+        filename = str(file_info.get("filename") or "")
+        if filename.lower().endswith(".pdf"):
+            return True
+    return False
+
+
+def _message_requests_pdf(message: str) -> bool:
+    lowered = (message or "").lower()
+    return "pdf" in lowered
+
+
+def _infer_run_failure_reason(
+    *,
+    message: str,
+    explicit_error: Optional[str],
+    pending_tool_calls: Dict[str, str],
+    tool_error_messages: List[str],
+    assistant_reply_generated: bool,
+    round_files: List[Dict[str, Any]],
+) -> Optional[str]:
+    reasons: List[str] = []
+    seen: Set[str] = set()
+
+    def _add(reason: Optional[str]) -> None:
+        text = (reason or "").strip()
+        if not text or text in seen:
+            return
+        seen.add(text)
+        reasons.append(text)
+
+    _add(explicit_error)
+
+    if pending_tool_calls:
+        unresolved = ", ".join(sorted({name for name in pending_tool_calls.values() if name})) or f"{len(pending_tool_calls)} 个工具调用"
+        _add(f"任务在工具调用尚未完成时提前结束：{unresolved}")
+
+    if _message_requests_pdf(message) and not _round_has_pdf(round_files):
+        _add("用户要求生成 PDF，但本轮没有生成任何 PDF 文件")
+
+    if not assistant_reply_generated:
+        _add("任务提前结束，未生成最终答复")
+
+    if tool_error_messages and reasons:
+        _add(f"工具执行报错：{tool_error_messages[0]}")
+
+    if reasons:
+        return "；".join(reasons)
+    return None
 
 
 async def _generate_session_title(first_message: str) -> str:
@@ -698,6 +799,7 @@ async def get_shared_session(session_id: str) -> ApiResponse:
             events=events,
             is_shared=True,
             mode=getattr(session, "mode", "deep"),
+            source=getattr(session, "source", None),
         ).model_dump())
     except ScienceSessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Shared session not found") from exc
@@ -1253,6 +1355,7 @@ async def get_session(session_id: str, current_user: User = Depends(require_user
             is_shared=getattr(session, "is_shared", False),
             mode=getattr(session, "mode", "deep"),
             model_config_id=mc_id,
+            source=getattr(session, "source", None),
         ).model_dump())
     except ScienceSessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1511,6 +1614,11 @@ async def _agent_background_worker(
 
     statistics: Dict[str, Any] = {}
     _chunk_buffer: list[str] = []
+    assistant_reply_generated = False
+    pending_tool_calls: Dict[str, str] = {}
+    tool_error_messages: List[str] = []
+    failure_reason: Optional[str] = None
+    error_event_persisted = False
 
     def _emit(evt_name: str, data_json: str) -> None:
         _emit_to_sse(session_id, {"event": evt_name, "data": data_json})
@@ -1544,9 +1652,10 @@ async def _agent_background_worker(
             language=language,
         ):
             if session.is_cancelled():
+                failure_reason = "Session stopped by user"
                 _emit("error", _json_dumps({
                     "event_id": _new_event_id(), "timestamp": _now_ts(),
-                    "error": "Session stopped by user",
+                    "error": failure_reason,
                 }))
                 return
 
@@ -1573,10 +1682,31 @@ async def _agent_background_worker(
                         "content": full_content, "role": "assistant", "attachments": [],
                     })
                     _append_session_event(session, persist_event)
+                    assistant_reply_generated = True
                     await session.save()
                     _chunk_buffer.clear()
                 _emit(evt_name, _json_dumps(mapped["data"]))
                 continue
+
+            evt_data = mapped.get("data") or {}
+            if evt_name == "message" and evt_data.get("role") == "assistant":
+                assistant_reply_generated = True
+            elif evt_name == "tool":
+                tool_call_id = str(evt_data.get("tool_call_id") or "")
+                tool_function = str(evt_data.get("function") or evt_data.get("name") or "tool")
+                tool_status = str(evt_data.get("status") or "")
+                if tool_status == "calling" and tool_call_id:
+                    pending_tool_calls[tool_call_id] = tool_function
+                elif tool_status == "called":
+                    pending_tool_calls.pop(tool_call_id, None)
+                    tool_error = _extract_tool_error_message(evt_data.get("content"))
+                    if tool_error:
+                        tool_error_messages.append(tool_error)
+            elif evt_name == "error":
+                error_text = str(evt_data.get("error") or "").strip()
+                if error_text and not failure_reason:
+                    failure_reason = error_text
+                error_event_persisted = True
 
             _append_session_event(session, mapped)
             if evt_name in ["message", "tool", "step", "plan"]:
@@ -1585,6 +1715,8 @@ async def _agent_background_worker(
 
     except Exception as exc:
         logger.exception(f"[AgentWorker] session={session_id} failed")
+        failure_reason = str(exc)
+        error_event_persisted = True
         error_event = _wrap_event("error", {
             "event_id": _new_event_id(), "timestamp": _now_ts(), "error": str(exc),
         })
@@ -1599,9 +1731,8 @@ async def _agent_background_worker(
                 "content": full_content, "role": "assistant", "attachments": [],
             })
             _append_session_event(session, persist_event)
+            assistant_reply_generated = True
             _chunk_buffer.clear()
-
-        setattr(session, "status", SessionStatus.COMPLETED)
 
         # Auto-detect skills
         try:
@@ -1659,11 +1790,33 @@ async def _agent_background_worker(
         except Exception:
             logger.debug("round_files diff failed", exc_info=True)
 
+        failure_reason = _infer_run_failure_reason(
+            message=message or "",
+            explicit_error=failure_reason,
+            pending_tool_calls=pending_tool_calls,
+            tool_error_messages=tool_error_messages,
+            assistant_reply_generated=assistant_reply_generated,
+            round_files=round_files,
+        )
+        run_failed = bool(failure_reason)
+        setattr(session, "status", SessionStatus.FAILED if run_failed else SessionStatus.COMPLETED)
+
+        if run_failed and not error_event_persisted:
+            error_event = _wrap_event("error", {
+                "event_id": _new_event_id(),
+                "timestamp": _now_ts(),
+                "error": failure_reason,
+            })
+            _append_session_event(session, error_event)
+            _emit(error_event["event"], _json_dumps(error_event["data"]))
+
         done_event = _wrap_event("done", {
             "event_id": _new_event_id(),
             "timestamp": _now_ts(),
             "statistics": statistics,
             "round_files": round_files,
+            "status": SessionStatus.FAILED if run_failed else SessionStatus.COMPLETED,
+            "error": failure_reason if run_failed else None,
         })
         _append_session_event(session, done_event)
         await session.save()
@@ -1679,7 +1832,10 @@ async def _agent_background_worker(
 
         _agent_tasks.pop(session_id, None)
         _agent_queues.pop(session_id, None)
-        logger.info(f"[AgentWorker] session={session_id} completed")
+        logger.info(
+            f"[AgentWorker] session={session_id} "
+            f"{'failed' if run_failed else 'completed'}"
+        )
 
 
 @router.post("/{session_id}/chat")
@@ -1712,6 +1868,38 @@ async def chat_with_session(
 
     existing_task = _agent_tasks.get(session_id)
     is_reconnect = existing_task is not None and not existing_task.done()
+    is_external_session = getattr(session, "source", None) == "im"
+
+    if is_external_session and not body.message and not is_reconnect:
+        logger.info(f"[Chat] Restoring external IM session {session_id} via persisted events")
+
+        async def _external_event_generator():
+            initial_events = list(getattr(session, "events", []) or [])
+            replay_events = _events_after_cursor(initial_events, body.event_id)
+            last_seen_count = len(initial_events)
+            for evt in replay_events:
+                yield {"event": evt["event"], "data": _json_dumps(evt.get("data", {}))}
+
+            idle_loops = 0
+            while True:
+                if await request.is_disconnected():
+                    break
+                latest_session = await async_get_science_session(session_id)
+                latest_events = list(getattr(latest_session, "events", []) or [])
+                while last_seen_count < len(latest_events):
+                    evt = latest_events[last_seen_count]
+                    last_seen_count += 1
+                    yield {"event": evt["event"], "data": _json_dumps(evt.get("data", {}))}
+                    idle_loops = 0
+                latest_status = getattr(latest_session, "status", SessionStatus.PENDING)
+                if latest_status not in (SessionStatus.RUNNING, SessionStatus.PENDING):
+                    break
+                idle_loops += 1
+                if idle_loops >= 1200:
+                    break
+                await _asyncio.sleep(0.5)
+
+        return EventSourceResponse(_external_event_generator())
 
     # Orphan detection: session DB says RUNNING but no live agent task exists
     # (happens after a server restart). Don't start a phantom agent — just
@@ -1722,6 +1910,7 @@ async def chat_with_session(
         not is_reconnect
         and session.status == SessionStatus.RUNNING
         and not body.message
+        and not is_external_session
     )
     if is_orphan:
         session.status = SessionStatus.COMPLETED
@@ -1764,14 +1953,8 @@ async def chat_with_session(
         try:
             # On reconnection: replay events the client missed (between getSession and now)
             if client_cursor:
-                found_cursor = False
-                for evt in list(session.events):
-                    evt_data = evt.get("data", {})
-                    if not found_cursor:
-                        if evt_data.get("event_id") == client_cursor:
-                            found_cursor = True
-                        continue
-                    yield {"event": evt["event"], "data": _json_dumps(evt_data)}
+                for evt in _events_after_cursor(list(session.events), client_cursor):
+                    yield {"event": evt["event"], "data": _json_dumps(evt.get("data", {}))}
 
             # Stream live events from the background worker
             while True:

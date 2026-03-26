@@ -105,12 +105,12 @@
                   <svg v-if="step.status === 'completed'" class="w-3.5 h-3.5 text-emerald-500" viewBox="0 0 16 16" fill="currentColor">
                     <path fill-rule="evenodd" d="M8 16A8 8 0 108 0a8 8 0 000 16zm3.78-9.72a.75.75 0 00-1.06-1.06L7 8.94 5.28 7.22a.75.75 0 00-1.06 1.06l2.25 2.25a.75.75 0 001.06 0l4.25-4.25z"/>
                   </svg>
-                  <div v-else-if="step.status === 'running'" class="w-3 h-3 border-[1.5px] border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                  <div v-else-if="['running', 'in_progress'].includes(step.status)" class="w-3 h-3 border-[1.5px] border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                   <div v-else class="w-3 h-3 rounded-full border-[1.5px] border-[var(--border-main)]"></div>
                 </div>
                 <span class="text-[12px] leading-4 flex-1 step-description"
                   :class="{
-                    'text-[var(--text-primary)] font-medium': step.status === 'running' || selectedStepId === step.id,
+                    'text-[var(--text-primary)] font-medium': ['running', 'in_progress'].includes(step.status) || selectedStepId === step.id,
                     'text-[var(--text-secondary)]': step.status === 'completed' && selectedStepId !== step.id,
                     'text-[var(--text-tertiary)]': step.status !== 'running' && step.status !== 'completed' && selectedStepId !== step.id
                   }">

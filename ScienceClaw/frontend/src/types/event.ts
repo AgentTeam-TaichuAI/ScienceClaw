@@ -32,7 +32,7 @@ export interface ToolEventData extends BaseEventData {
 }
 
 export interface StepEventData extends BaseEventData {
-  status: "pending" | "running" | "completed" | "failed"
+  status: "pending" | "running" | "in_progress" | "completed" | "failed"
   id: string
   description: string
   tools?: ToolEventData[]
@@ -73,6 +73,8 @@ export interface DoneEventData extends BaseEventData {
   statistics?: StatisticsData;
   /** 本轮新增/修改的文件列表 */
   round_files?: RoundFileInfo[];
+  status?: "completed" | "failed";
+  error?: string | null;
 }
 
 export interface WaitEventData extends BaseEventData {

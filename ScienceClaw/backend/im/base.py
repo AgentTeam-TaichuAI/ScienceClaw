@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 
 class IMPlatform(Enum):
     LARK = "lark"
+    TELEGRAM = "telegram"
     WECOM = "wecom"
     DINGTALK = "dingtalk"
     SLACK = "slack"
@@ -42,9 +43,21 @@ class IMChat:
 
 
 @dataclass
+class IMAttachment:
+    kind: str
+    file_path: str
+    filename: str
+    mime_type: Optional[str] = None
+    caption: Optional[str] = None
+    source_message_id: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class IMMessage:
     platform: IMPlatform
     message_id: str
+    delivery_id: str
     user: IMUser
     chat: IMChat
     content_type: str
@@ -52,11 +65,13 @@ class IMMessage:
     raw_message: Dict[str, Any]
     timestamp: int
     is_at_me: bool = False
+    attachments: list[IMAttachment] = field(default_factory=list)
+    media_group_id: Optional[str] = None
 
     def get_text(self) -> str:
         if self.content_type == "text":
             return self.content
-        return ""
+        return self.content or ""
 
 
 @dataclass
@@ -67,10 +82,13 @@ class IMResponse:
     reply_to_message_id: Optional[str] = None
     thread_id: Optional[str] = None
     root_id: Optional[str] = None
+    attachments: list[IMAttachment] = field(default_factory=list)
+    edit_target_id: Optional[str] = None
 
 
 class IMAdapter(ABC):
     platform: IMPlatform
+    supports_card_entity: bool = False
 
     @abstractmethod
     async def verify_webhook(self, request: Any) -> bool:
@@ -83,6 +101,9 @@ class IMAdapter(ABC):
     @abstractmethod
     async def send_message(self, chat: IMChat, response: IMResponse) -> bool:
         raise NotImplementedError
+
+    async def send_message_with_id(self, chat: IMChat, response: IMResponse) -> Tuple[bool, Optional[str]]:
+        return await self.send_message(chat, response), None
 
     async def update_message(self, message_id: str, response: IMResponse) -> bool:
         return False

@@ -29,7 +29,7 @@
       <div class="max-h-[min(calc(100vh-360px),320px)] overflow-y-auto px-3 pb-3">
         <div v-for="(step, idx) in plan.steps" :key="step.id"
           class="flex items-start gap-2 py-1.5 px-1.5 rounded-md transition-colors"
-          :class="{ 'bg-blue-50/40 dark:bg-blue-950/15': step.status === 'running' }">
+          :class="{ 'bg-blue-50/40 dark:bg-blue-950/15': ['running', 'in_progress'].includes(step.status) }">
           <!-- 状态图标 -->
           <div class="flex-shrink-0 w-4 h-4 mt-0.5 flex items-center justify-center">
             <svg v-if="step.status === 'completed'" class="w-4 h-4 text-emerald-500" viewBox="0 0 16 16" fill="currentColor">
@@ -38,17 +38,17 @@
             <svg v-else-if="step.status === 'failed'" class="w-4 h-4 text-amber-500" viewBox="0 0 16 16" fill="currentColor">
               <path fill-rule="evenodd" d="M8 16A8 8 0 108 0a8 8 0 000 16zM7.25 4.75a.75.75 0 011.5 0v3.5a.75.75 0 01-1.5 0v-3.5zM8 11a1 1 0 100-2 1 1 0 000 2z"/>
             </svg>
-            <div v-else-if="step.status === 'running'" class="w-3.5 h-3.5 border-[1.5px] border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+            <div v-else-if="['running', 'in_progress'].includes(step.status)" class="w-3.5 h-3.5 border-[1.5px] border-blue-500 border-t-transparent rounded-full animate-spin"></div>
             <div v-else class="w-3.5 h-3.5 rounded-full border-[1.5px] border-[var(--border-main)]"></div>
           </div>
           <!-- 内容 -->
           <div class="flex-1 min-w-0">
             <div class="text-[13px] leading-5"
               :class="{
-                'text-[var(--text-primary)]': step.status === 'running',
+                'text-[var(--text-primary)]': ['running', 'in_progress'].includes(step.status),
                 'text-[var(--text-secondary)]': step.status === 'completed',
                 'text-amber-600 dark:text-amber-400': step.status === 'failed',
-                'text-[var(--text-tertiary)]': !['running', 'completed', 'failed'].includes(step.status)
+                'text-[var(--text-tertiary)]': !['running', 'in_progress', 'completed', 'failed'].includes(step.status)
               }">
               {{ step.description }}
             </div>
@@ -130,11 +130,11 @@ const progressPercent = computed(() => {
 
 const isCompleted = computed(() => props.plan?.steps.every(s => s.status === 'completed') ?? false);
 const hasFailed = computed(() => props.plan?.steps.some(s => s.status === 'failed') ?? false);
-const isRunning = computed(() => props.plan?.steps.some(s => s.status === 'running') ?? false);
+const isRunning = computed(() => props.plan?.steps.some(s => ['running', 'in_progress'].includes(s.status)) ?? false);
 
 const currentStep = computed(() => {
   for (const s of props.plan?.steps ?? []) {
-    if (s.status === 'running' || s.status === 'pending') return s.description;
+    if (s.status === 'running' || s.status === 'in_progress' || s.status === 'pending') return s.description;
   }
   if (hasFailed.value) return t('Task Interrupted');
   return t('Task Completed');

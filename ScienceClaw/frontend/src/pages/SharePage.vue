@@ -307,7 +307,7 @@ const handleMessageEvent = (messageData: MessageEventData) => {
     content: { ...messageData } as MessageContent,
   });
 
-  if (messageData.attachments?.length > 0) {
+  if (messageData.role === 'user' && messageData.attachments?.length > 0) {
     messages.value.push({
       type: 'attachments',
       content: { ...messageData } as AttachmentsContent,
@@ -327,7 +327,7 @@ const handleToolEvent = (toolData: ToolEventData) => {
 
   let associatedWithStep = false;
   if (plan.value) {
-    const runningStep = plan.value.steps.find(s => s.status === 'running');
+    const runningStep = plan.value.steps.find(s => s.status === 'running' || s.status === 'in_progress');
     if (runningStep) {
       if (!runningStep.tools) runningStep.tools = [];
       const existingTool = runningStep.tools.find(t => t.tool_call_id === toolContent.tool_call_id);
@@ -349,7 +349,7 @@ const handleToolEvent = (toolData: ToolEventData) => {
   if (lastTool.value && lastTool.value.tool_call_id === toolContent.tool_call_id) {
     smartMerge(lastTool.value, toolContent);
   } else {
-    if (lastStep?.status === 'running') {
+    if (lastStep?.status === 'running' || lastStep?.status === 'in_progress') {
       lastStep.tools.push(toolContent);
     } else {
       messages.value.push({ type: 'tool', content: toolContent });
@@ -402,7 +402,7 @@ const flushPendingToolsToStep = (planStep: StepEventData) => {
 
 const findBestStepForFlush = (): StepEventData | undefined => {
   if (!plan.value?.steps.length) return undefined;
-  return plan.value.steps.find(s => s.status === 'running')
+  return plan.value.steps.find(s => s.status === 'running' || s.status === 'in_progress')
     || plan.value.steps.find(s => s.status === 'completed')
     || plan.value.steps[0];
 };
@@ -414,14 +414,14 @@ const handleStepEvent = (stepData: StepEventData) => {
     const planStep = plan.value.steps.find(s => s.id === stepData.id);
     if (planStep) {
       planStep.status = stepData.status;
-      if (pendingToolCallIds.value.length > 0 && (stepData.status === 'running' || stepData.status === 'completed')) {
+      if (pendingToolCallIds.value.length > 0 && (stepData.status === 'running' || stepData.status === 'in_progress' || stepData.status === 'completed')) {
         flushPendingToolsToStep(planStep);
         plan.value = { ...plan.value };
       }
     }
   }
 
-  if (stepData.status === 'running') {
+  if (stepData.status === 'running' || stepData.status === 'in_progress') {
     messages.value.push({
       type: 'step',
       content: { ...stepData, tools: [] } as StepContent,
@@ -456,6 +456,20 @@ const handleThinkingEvent = (thinkingData: ThinkingEventData) => {
 
 const handleDoneEvent = (doneData: DoneEventData) => {
   isLoading.value = false;
+  if (plan.value?.steps?.length) {
+    for (const step of plan.value.steps) {
+      if (step.status !== 'completed' && step.status !== 'failed') {
+        step.status = doneData.status === 'failed' ? 'failed' : 'completed';
+      }
+    }
+    plan.value = { ...plan.value };
+  }
+  if (doneData.status === 'failed' && doneData.error) {
+    messages.value.push({
+      type: 'assistant',
+      content: { content: doneData.error, timestamp: doneData.timestamp } as MessageContent,
+    });
+  }
   if (doneData.statistics) {
     sessionStatistics.value = doneData.statistics;
     // 将统计信息设置到最后一个 assistant 消息的 content.statistics
