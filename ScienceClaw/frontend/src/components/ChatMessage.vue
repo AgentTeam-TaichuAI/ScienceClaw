@@ -582,7 +582,7 @@ const handleConvertToPdf = () => {
 
 // 本轮文件
 const roundFiles = computed(() => messageContent.value.round_files || []);
-const { showRoundFilesPanel, showFileListPanel } = useFilePanel();
+const { showFileListPanel } = useFilePanel();
 
 // 处理 Markdown 内容区域的点击事件（图片 Lightbox + 代码块全屏）
 const handleMarkdownClick = (event: MouseEvent) => {

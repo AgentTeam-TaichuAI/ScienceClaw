@@ -203,7 +203,6 @@ async def async_create_science_session(
         source=source,
         created_at=now,
         updated_at=now,
-        source=source,
     )
 
     session_doc = {
@@ -303,7 +302,6 @@ async def async_get_science_session(session_id: str) -> ScienceSession:
         latest_message=doc.get("latest_message", ""),
         latest_message_at=doc.get("latest_message_at", 0),
         pinned=doc.get("pinned", False),
-        source=doc.get("source"),
     )
 
     async with _sessions_lock:
@@ -351,7 +349,6 @@ async def async_list_science_sessions(user_id: Optional[str] = None) -> List[Sci
             latest_message=doc.get("latest_message", ""),
             latest_message_at=doc.get("latest_message_at", 0),
             pinned=doc.get("pinned", False),
-            source=doc.get("source"),
         )
         sessions.append(s)
 
