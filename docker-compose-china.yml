@@ -139,7 +139,6 @@ services:
       OBSIDIAN_VAULT_DIR: /home/scienceclaw/obsidian_vault
       OBSIDIAN_HOST_BRIDGE_URL: ${OBSIDIAN_HOST_BRIDGE_URL:-http://host.docker.internal:8765}
       OBSIDIAN_HOST_BRIDGE_TOKEN: ${OBSIDIAN_HOST_BRIDGE_TOKEN:-scienceclaw-local-bridge}
-      TASK_SERVICE_API_KEY: ${TASK_SERVICE_API_KEY:-}
       IM_ENABLED: "true"
       IM_RESPONSE_TIMEOUT: 300
       IM_MAX_MESSAGE_LENGTH: 4000
