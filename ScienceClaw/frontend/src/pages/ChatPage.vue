@@ -203,6 +203,28 @@
               <X :size="16" class="text-[var(--icon-tertiary)]" />
             </button>
           </div>
+          <div v-if="showZoteroReviewSuggestion"
+            class="flex items-center gap-3 px-4 py-3 mb-2 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/80 dark:bg-indigo-950/30 animate-fadeIn">
+            <FileSearch :size="18" class="text-indigo-500 flex-shrink-0" />
+            <div class="flex-1 min-w-0">
+              <div class="text-sm font-medium text-[var(--text-primary)] truncate">
+                {{ t('Run Zotero Review Agent?') }}
+              </div>
+              <div class="text-xs text-[var(--text-tertiary)]">
+                {{ hasPdfAttachment
+                  ? t('Detected JSON and PDF attachments. Start the local Zotero → PDF evidence → Chinese review → Obsidian workflow.')
+                  : t('Detected JSON attachments. Start the local Zotero → PDF evidence → Chinese review → Obsidian workflow.') }}
+              </div>
+            </div>
+            <button @click="handleRunZoteroReviewAgentSuggestion"
+              class="px-3 py-1.5 text-sm font-medium rounded-lg bg-indigo-500 text-white hover:bg-indigo-600 transition-colors flex-shrink-0">
+              {{ t('Run Agent') }}
+            </button>
+            <button @click="dismissZoteroReviewSuggestion"
+              class="p-1 rounded-md hover:bg-[var(--fill-tsp-gray-main)] transition-colors flex-shrink-0">
+              <X :size="16" class="text-[var(--icon-tertiary)]" />
+            </button>
+          </div>
           <ChatBox v-model="inputMessage" :rows="1" @submit="handleSubmit" :isRunning="isLoading" @stop="handleStop"
             :attachments="attachments"
             :sessionId="sessionId"
@@ -221,6 +243,7 @@
         ref="activityPanelRef"
         :items="displayActivityItems"
         :plan="displayActivityPlan"
+        :skillState="displaySkillState"
         :isLoading="isLoading && selectedActivityTurn === -1"
         :lastTurnHadError="lastTurnHadError"
         @toolClick="handleToolClick"
@@ -242,7 +265,7 @@ import { useI18n } from 'vue-i18n';
 import ChatBox from '../components/ChatBox.vue';
 import ChatMessage from '../components/ChatMessage.vue';
 import * as agentApi from '../api/agent';
-import { Message, MessageContent, ToolContent, StepContent, AttachmentsContent, ThinkingContent } from '../types/message';
+import { Message, MessageContent, ToolContent, StepContent, AttachmentsContent } from '../types/message';
 import {
   StepEventData,
   ToolEventData,
@@ -252,19 +275,17 @@ import {
   PlanEventData,
   ThinkingEventData,
   DoneEventData,
+  SkillUsageEventData,
   AgentSSEEvent,
 } from '../types/event';
 import ToolPanel from '../components/ToolPanel.vue'
-import PlanPanel from '../components/PlanPanel.vue';
-import { ArrowDown, FileSearch, PanelLeft, Lock, Globe, Link, Check, Package, Wrench, X } from 'lucide-vue-next';
+import { ArrowDown, FileSearch, Lock, Globe, Link, Check, Package, Wrench, X } from 'lucide-vue-next';
 import ShareIcon from '@/components/icons/ShareIcon.vue';
 import { showErrorToast, showSuccessToast } from '../utils/toast';
 import type { FileInfo } from '../api/file';
-import { useLeftPanel } from '../composables/useLeftPanel'
 import { useSessionListUpdate } from '../composables/useSessionListUpdate'
 import { useSessionFileList } from '../composables/useSessionFileList'
 import { useFilePanel } from '../composables/useFilePanel'
-import { useAuth } from '../composables/useAuth' // Import useAuth
 import { copyToClipboard } from '../utils/dom'
 import { SessionStatus } from '../types/response';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -275,7 +296,6 @@ import { useSessionNotifications } from '../composables/useSessionNotifications'
 import { consumePendingChat } from '../composables/usePendingChat';
 
 import { useMessageGrouper } from '../composables/useMessageGrouper';
-import ProcessMessage from '../components/ProcessMessage.vue';
 import ActivityPanel from '../components/ActivityPanel.vue';
 import type { ActivityItem } from '../components/ActivityPanel.vue';
 
@@ -283,7 +303,6 @@ const router = useRouter()
 const { t, locale } = useI18n()
 const { shared } = useSessionFileList()
 const { hideFilePanel, showFileListPanel } = useFilePanel()
-const { currentUser } = useAuth()
 const { updateSessionTitle } = useSessionListUpdate()
 const { onSessionUpdated } = useSessionNotifications()
 const sessionSource = ref<string | null>(null);
@@ -318,9 +337,21 @@ const createInitialState = () => ({
   linkCopied: false,
   sharingLoading: false, // Loading state for share operations
   mode: 'deep' as string,
-  thinkingContent: '' as string, // Thinking event content
   activityItems: [] as ActivityItem[], // Activity panel timeline items
-  activitySnapshots: [] as { items: ActivityItem[], plan: PlanEventData | undefined }[], // Per-turn snapshots
+  skillState: {
+    requiredSkills: [] as string[],
+    readSkills: [] as string[],
+    missingRequiredSkills: [] as string[],
+  },
+  activitySnapshots: [] as {
+    items: ActivityItem[],
+    plan: PlanEventData | undefined,
+    skillState: {
+      requiredSkills: string[],
+      readSkills: string[],
+      missingRequiredSkills: string[],
+    },
+  }[], // Per-turn snapshots
   selectedActivityTurn: -1 as number, // Which turn to show (-1 = live/current)
   pendingToolCallIds: [] as string[], // Tools not yet associated with any plan step
 });
@@ -348,8 +379,8 @@ const {
   linkCopied,
   sharingLoading,
   mode,
-  thinkingContent,
   activityItems,
+  skillState,
   activitySnapshots,
   selectedActivityTurn,
   pendingToolCallIds,
@@ -380,6 +411,13 @@ const displayActivityPlan = computed(() => {
   return plan.value;
 });
 
+const displaySkillState = computed(() => {
+  if (selectedActivityTurn.value >= 0 && selectedActivityTurn.value < activitySnapshots.value.length) {
+    return activitySnapshots.value[selectedActivityTurn.value].skillState;
+  }
+  return skillState.value;
+});
+
 // Skill save prompt state (persists across state resets)
 const pendingSkillSave = ref<string | null>(null);
 const savingSkill = ref(false);
@@ -388,6 +426,7 @@ const savingSkill = ref(false);
 const pendingToolSave = ref<string | null>(null);
 const pendingToolReplaces = ref<string | null>(null);
 const savingTool = ref(false);
+const dismissedZoteroReviewSuggestion = ref(false);
 
 // 上一轮是否因报错结束（用于显示「推理失败」而非「推理完成」）
 const lastTurnHadError = ref(false);
@@ -612,7 +651,11 @@ const handleToolEvent = (toolData: ToolEventData) => {
       (a) => a.type === 'tool' && a.tool?.tool_call_id === toolContent.tool_call_id
     );
     if (existingIdx >= 0) {
-      const merged = { ...activityItems.value[existingIdx].tool };
+      const existingTool = activityItems.value[existingIdx].tool;
+      if (!existingTool) {
+        return;
+      }
+      const merged: ToolContent = { ...existingTool };
       smartMerge(merged, toolContent);
       activityItems.value[existingIdx] = {
         ...activityItems.value[existingIdx],
@@ -692,7 +735,6 @@ const handleStepEvent = (stepData: StepEventData) => {
 
 // Handle thinking event → append to current thinking item or create new one
 const handleThinkingEvent = (thinkingData: ThinkingEventData) => {
-  thinkingContent.value = thinkingData.content;
   if (thinkingData.content) {
     const last = activityItems.value[activityItems.value.length - 1];
     if (last && last.type === 'thinking') {
@@ -708,6 +750,33 @@ const handleThinkingEvent = (thinkingData: ThinkingEventData) => {
     }
   }
   activityPanelRef.value?.show();
+}
+
+const handleSkillUsageEvent = (skillData: SkillUsageEventData) => {
+  const nextRequired = Array.isArray(skillData.required_skills)
+    ? [...skillData.required_skills]
+    : [...skillState.value.requiredSkills];
+  const nextRead = Array.isArray(skillData.read_skills)
+    ? [...skillData.read_skills]
+    : [...skillState.value.readSkills];
+  const nextMissing = Array.isArray(skillData.missing_required_skills)
+    ? [...skillData.missing_required_skills]
+    : [...skillState.value.missingRequiredSkills];
+
+  if (skillData.skill_name) {
+    if (!nextRequired.includes(skillData.skill_name) && nextMissing.includes(skillData.skill_name)) {
+      nextRequired.push(skillData.skill_name);
+    }
+    if (!nextRead.includes(skillData.skill_name) && !nextMissing.includes(skillData.skill_name)) {
+      nextRead.push(skillData.skill_name);
+    }
+  }
+
+  skillState.value = {
+    requiredSkills: nextRequired,
+    readSkills: nextRead,
+    missingRequiredSkills: nextMissing,
+  };
 }
 
 // Handle done event with statistics
@@ -767,8 +836,14 @@ const handleDoneEvent = (doneData: DoneEventData) => {
   activitySnapshots.value.push({
     items: [...activityItems.value],
     plan: plan.value ? JSON.parse(JSON.stringify(plan.value)) : undefined,
+    skillState: JSON.parse(JSON.stringify(skillState.value)),
   });
   activityItems.value = [];
+  skillState.value = {
+    requiredSkills: [],
+    readSkills: [],
+    missingRequiredSkills: [],
+  };
   pendingToolCallIds.value = [];
   plan.value = undefined;
   selectedActivityTurn.value = turnIdx;
@@ -855,6 +930,8 @@ const handleEvent = (event: AgentSSEEvent) => {
     handleStepEvent(event.data as StepEventData);
   } else if (event.event === 'thinking') {
     handleThinkingEvent(event.data as ThinkingEventData);
+  } else if (event.event === 'skill_required' || event.event === 'skill_read' || event.event === 'skill_missing') {
+    handleSkillUsageEvent(event.data as SkillUsageEventData);
   } else if (event.event === 'skill_save_prompt') {
     if (realTime.value) {
       const skillName = (event.data as any)?.skill_name;
@@ -885,6 +962,7 @@ const handleEvent = (event: AgentSSEEvent) => {
 
 const onFilesChanged = (files: FileInfo[]) => {
   attachments.value = [...files];
+  dismissedZoteroReviewSuggestion.value = false;
 };
 
 const handleSubmit = () => {
@@ -1005,6 +1083,11 @@ const chat = async (message: string = '', files: FileInfo[] = [], reconnect: boo
     attachments.value = [];
     selectedActivityTurn.value = -1;
     activityItems.value = [];
+    skillState.value = {
+      requiredSkills: [],
+      readSkills: [],
+      missingRequiredSkills: [],
+    };
     pendingToolCallIds.value = [];
 
     if (message.trim()) {
@@ -1305,6 +1388,38 @@ const handleSuggestionClick = (question: string) => {
   chat(question);
 }
 
+const hasZoteroJsonAttachment = computed(() =>
+  attachments.value.some(file => (file.filename || '').toLowerCase().endsWith('.json'))
+);
+
+const hasPdfAttachment = computed(() =>
+  attachments.value.some(file => (file.filename || '').toLowerCase().endsWith('.pdf'))
+);
+
+const showZoteroReviewSuggestion = computed(() =>
+  !isLoading.value
+  && !dismissedZoteroReviewSuggestion.value
+  && hasZoteroJsonAttachment.value
+  && attachments.value.length > 0
+);
+
+const zoteroReviewSuggestionPrompt = computed(() => (
+  '请运行 Zotero Review Agent。'
+  + '优先调用 `obsidian_run_zotero_review_agent` 处理我刚上传的 Zotero Better BibTeX JSON，'
+  + '优先读取其中关联 PDF 的全文证据，'
+  + '然后按顺序读取 `/skills/literature-review/SKILL.md`、`/skills/scientific-writing/SKILL.md`、`/skills/obsidian-markdown/SKILL.md`，'
+  + '生成中文综述并回写到同一份 Obsidian review note。'
+));
+
+const handleRunZoteroReviewAgentSuggestion = () => {
+  if (!attachments.value.length) return;
+  chat(zoteroReviewSuggestionPrompt.value, attachments.value);
+};
+
+const dismissZoteroReviewSuggestion = () => {
+  dismissedZoteroReviewSuggestion.value = true;
+};
+
 const handleConvertToPdf = () => {
   inputMessage.value = '转成pdf';
 }
@@ -1434,19 +1549,6 @@ const handleInstantShare = async () => {
     sharingLoading.value = false;
   }
 }
-
-const formatStatsDuration = (ms: number): string => {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  const mins = Math.floor(ms / 60000);
-  const secs = ((ms % 60000) / 1000).toFixed(0);
-  return `${mins}m ${secs}s`;
-};
-
-const formatTokenCount = (count: number): string => {
-  if (count < 1000) return `${count}`;
-  return `${(count / 1000).toFixed(1)}K`;
-};
 
 const handleCopyLink = async () => {
   if (!sessionId.value) return;

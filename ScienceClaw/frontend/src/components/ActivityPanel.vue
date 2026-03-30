@@ -125,6 +125,47 @@
         </template>
 
         <!-- ═══ Tools Section ═══ -->
+        <template v-if="hasSkillState">
+          <div
+            @click="skillsExpanded = !skillsExpanded"
+            class="flex-shrink-0 flex items-center gap-2 cursor-pointer select-none group/sec px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-colors"
+          >
+            <ChevronRightIcon :size="12"
+              class="text-gray-400 dark:text-gray-500 transition-transform duration-150 flex-shrink-0"
+              :class="{ 'rotate-90': skillsExpanded }" />
+            <BookOpen :size="13" class="text-sky-400 flex-shrink-0" />
+            <span class="text-[12px] font-semibold transition-colors"
+              :class="skillsExpanded ? 'text-gray-600 dark:text-gray-300' : 'text-gray-400 dark:text-gray-500 group-hover/sec:text-gray-600 dark:group-hover/sec:text-gray-300'">
+              Local Skills
+            </span>
+            <span class="text-[10px] text-gray-400 dark:text-gray-500 font-bold tabular-nums ml-auto bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded-md">
+              {{ skillSummary }}
+            </span>
+          </div>
+          <div v-if="skillsExpanded" class="border-b border-gray-100 dark:border-gray-800 px-4 py-2 section-content-enter">
+            <div class="flex flex-col gap-2 text-[12px]">
+              <div v-if="props.skillState?.requiredSkills?.length">
+                <div class="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1">Required</div>
+                <div class="flex flex-wrap gap-1">
+                  <span v-for="skill in props.skillState.requiredSkills" :key="`required-${skill}`" class="px-2 py-1 rounded-full bg-sky-50 text-sky-700 dark:bg-sky-950/30 dark:text-sky-300 border border-sky-200/60 dark:border-sky-800/40">{{ skill }}</span>
+                </div>
+              </div>
+              <div v-if="props.skillState?.readSkills?.length">
+                <div class="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1">Read</div>
+                <div class="flex flex-wrap gap-1">
+                  <span v-for="skill in props.skillState.readSkills" :key="`read-${skill}`" class="px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/40">{{ skill }}</span>
+                </div>
+              </div>
+              <div v-if="props.skillState?.missingRequiredSkills?.length">
+                <div class="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1">Missing</div>
+                <div class="flex flex-wrap gap-1">
+                  <span v-for="skill in props.skillState.missingRequiredSkills" :key="`missing-${skill}`" class="px-2 py-1 rounded-full bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300 border border-amber-200/60 dark:border-amber-800/40">{{ skill }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+
         <template v-if="toolItems.length > 0 || isLoading">
           <!-- Tools header -->
           <div
@@ -237,14 +278,14 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
-import { X as XIcon, ChevronRight as ChevronRightIcon, Zap as ZapIcon, Lightbulb, ListChecks, Wrench as WrenchIcon } from 'lucide-vue-next';
+import { X as XIcon, ChevronRight as ChevronRightIcon, Zap as ZapIcon, Lightbulb, ListChecks, Wrench as WrenchIcon, BookOpen } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
 import LoadingSpinnerIcon from './icons/LoadingSpinnerIcon.vue';
 import SandboxPreview from './SandboxPreview.vue';
 import type { ToolContent } from '../types/message';
-import type { PlanEventData, StepEventData } from '../types/event';
+import type { PlanEventData } from '../types/event';
 import type { SandboxPreviewMode } from '../utils/sandbox';
 import { getPreviewMode } from '../utils/sandbox';
 import { useResizeObserver } from '../composables/useResizeObserver';
@@ -263,6 +304,11 @@ export interface ActivityItem {
 const props = withDefaults(defineProps<{
   items: ActivityItem[];
   plan?: PlanEventData;
+  skillState?: {
+    requiredSkills: string[];
+    readSkills: string[];
+    missingRequiredSkills: string[];
+  };
   isLoading: boolean;
   lastTurnHadError?: boolean;
 }>(), { lastTurnHadError: false });
@@ -295,6 +341,7 @@ const panelWidth = computed(() => Math.min(parentWidth.value / 2, 600));
 // Section expand/collapse states
 const thinkingExpanded = ref(true);
 const todosExpanded = ref(true);
+const skillsExpanded = ref(true);
 const toolsExpanded = ref(true);
 
 // Step filter: when a To-do step is selected, only show its associated tools
@@ -378,6 +425,18 @@ const planPercent = computed(() => {
 });
 
 const planCompleted = computed(() => props.plan?.steps.every(s => s.status === 'completed') ?? false);
+const hasSkillState = computed(() =>
+  Boolean(
+    props.skillState?.requiredSkills?.length
+    || props.skillState?.readSkills?.length
+    || props.skillState?.missingRequiredSkills?.length,
+  ),
+);
+const skillSummary = computed(() => {
+  const readCount = props.skillState?.readSkills?.length ?? 0;
+  const requiredCount = props.skillState?.requiredSkills?.length ?? 0;
+  return `${readCount}/${requiredCount}`;
+});
 
 const isVisible = computed(() => visible.value);
 
@@ -397,10 +456,6 @@ const getToolArg = (tool: ToolContent): string => {
 const formatDuration = (ms: number): string => {
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
-};
-
-const handleToolClick = (tool: ToolContent) => {
-  emit('toolClick', tool);
 };
 
 const handleClose = () => {

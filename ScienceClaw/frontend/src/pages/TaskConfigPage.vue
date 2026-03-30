@@ -282,7 +282,7 @@ import type { ModelConfig } from '@/api/models';
 import type { Webhook } from '@/api/webhooks';
 import { getAuthStatus } from '@/api/auth';
 import { useSettingsDialog } from '@/composables/useSettingsDialog';
-import { showSuccessToast, showErrorToast } from '@/utils/toast';
+import { showErrorToast } from '@/utils/toast';
 import ProviderIcon from '@/components/icons/ProviderIcon.vue';
 
 const { t } = useI18n();

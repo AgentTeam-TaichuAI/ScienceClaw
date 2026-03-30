@@ -1,8 +1,38 @@
 import type { FileInfo } from '../api/file';
 
 export type AgentSSEEvent = {
-  event: 'tool' | 'step' | 'message' | 'error' | 'done' | 'title' | 'wait' | 'plan' | 'attachments' | 'thinking';
-  data: ToolEventData | StepEventData | MessageEventData | ErrorEventData | DoneEventData | TitleEventData | WaitEventData | PlanEventData | ThinkingEventData;
+  event:
+    | 'tool'
+    | 'step'
+    | 'message'
+    | 'error'
+    | 'done'
+    | 'title'
+    | 'wait'
+    | 'plan'
+    | 'attachments'
+    | 'thinking'
+    | 'message_chunk'
+    | 'message_chunk_done'
+    | 'skill_required'
+    | 'skill_read'
+    | 'skill_missing'
+    | 'skill_save_prompt'
+    | 'tool_save_prompt';
+  data:
+    | ToolEventData
+    | StepEventData
+    | MessageEventData
+    | ErrorEventData
+    | DoneEventData
+    | TitleEventData
+    | WaitEventData
+    | PlanEventData
+    | ThinkingEventData
+    | MessageChunkEventData
+    | SkillUsageEventData
+    | SkillSavePromptEventData
+    | ToolSavePromptEventData;
 }
 
 export interface BaseEventData {
@@ -91,4 +121,24 @@ export interface PlanEventData extends BaseEventData {
 /** 思考过程事件 */
 export interface ThinkingEventData extends BaseEventData {
   content: string;
+}
+
+export interface MessageChunkEventData extends BaseEventData {
+  content: string;
+}
+
+export interface SkillUsageEventData extends BaseEventData {
+  skill_name?: string;
+  required_skills?: string[];
+  read_skills?: string[];
+  missing_required_skills?: string[];
+}
+
+export interface SkillSavePromptEventData extends BaseEventData {
+  skill_name?: string;
+}
+
+export interface ToolSavePromptEventData extends BaseEventData {
+  tool_name?: string;
+  replaces?: string | null;
 }

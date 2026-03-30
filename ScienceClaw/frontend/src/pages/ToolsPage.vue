@@ -1,377 +1,440 @@
 <template>
-  <div class="flex flex-col h-full w-full overflow-hidden tools-page">
-    <!-- Hero Header -->
-    <div class="flex-shrink-0 relative overflow-hidden">
-      <div class="absolute inset-0 bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-700"></div>
-      <div class="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wNCI+PHBhdGggZD0iTTM2IDM0djZoLTZ2LTZoNnptMC0zMHY2aC02VjRoNnoiLz48L2c+PC9nPjwvc3ZnPg==')] opacity-50"></div>
-      <div class="relative px-6 py-5">
-        <div class="flex items-center justify-between">
-          <div>
-            <h1 class="text-xl font-bold text-white flex items-center gap-2">
-              <span class="inline-flex items-center justify-center size-8 rounded-lg bg-white/15 backdrop-blur-sm">
-                <svg class="size-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>
-              </span>
-              Tools Library
-            </h1>
-            <p class="text-white/60 text-xs mt-1">{{ activeTab === 'science' ? `${scienceToolsTotal} scientific tools across ${scienceCategories.length} categories` : `${externalTools.length} external tools installed` }}</p>
-          </div>
-          <div class="flex items-center gap-3">
-            <!-- Tab 切换 -->
-            <div class="flex items-center bg-white/10 backdrop-blur-sm rounded-lg p-0.5">
-              <button 
-                v-for="tab in tabs" :key="tab.id"
-                @click="activeTab = tab.id"
-                class="relative px-3.5 py-1.5 text-xs font-medium rounded-md transition-all duration-300"
-                :class="activeTab === tab.id
-                  ? 'bg-white text-indigo-700 shadow-lg shadow-white/20'
-                  : 'text-white/70 hover:text-white hover:bg-white/10'"
-              >
-                {{ tab.label }}
-                <span v-if="tab.count !== undefined" class="ml-1 text-[10px] tabular-nums">{{ tab.count }}</span>
-              </button>
+  <div class="flex h-full w-full flex-col overflow-hidden bg-[var(--background-gray-main)]">
+    <header class="relative overflow-hidden border-b border-white/10">
+      <div class="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.25),_transparent_30%),radial-gradient(circle_at_78%_18%,_rgba(59,130,246,0.22),_transparent_34%),linear-gradient(135deg,_#111827_0%,_#0f172a_48%,_#1f2937_100%)]"></div>
+      <div class="relative px-5 py-5 md:px-6">
+        <div class="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          <div class="space-y-3">
+            <div class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-white/75 backdrop-blur-sm">
+              Discipline-First Library
             </div>
-            <!-- 搜索 -->
-            <div class="relative group">
-              <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-white/40 size-4 group-focus-within:text-white/70 transition-colors" />
-              <input 
-                v-model="searchQuery" type="text" 
-                :placeholder="activeTab === 'science' ? 'Search scientific tools...' : 'Search tools...'" 
-                class="w-64 bg-white/10 backdrop-blur-sm border border-white/10 rounded-lg pl-9 pr-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:bg-white/15 focus:border-white/25 focus:ring-1 focus:ring-white/20 transition-all duration-200"
-                @input="onSearchInput"
-              >
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Science Tools Tab -->
-    <div v-if="activeTab === 'science'" class="flex-1 overflow-hidden flex bg-[#f8f9fb] dark:bg-[#111]">
-      <!-- Category Sidebar -->
-      <div class="w-56 border-r border-[var(--border-light)] bg-white/80 dark:bg-[#1a1a1a]/80 backdrop-blur-sm overflow-y-auto flex-shrink-0">
-        <div class="p-2.5 space-y-0.5">
-          <button @click="selectedCategory = ''"
-            class="w-full text-left px-3 py-2.5 rounded-xl text-sm transition-all duration-200"
-            :class="!selectedCategory 
-              ? 'bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 text-blue-700 dark:text-blue-300 font-semibold shadow-sm' 
-              : 'text-[var(--text-secondary)] hover:bg-gray-50 dark:hover:bg-white/5'">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <div class="size-1.5 rounded-full bg-blue-500"></div>
-                <span>All Tools</span>
-              </div>
-              <span class="text-[10px] tabular-nums font-mono opacity-50">{{ scienceToolsTotal }}</span>
-            </div>
-          </button>
-          <button v-for="cat in scienceCategories" :key="cat.name"
-            @click="selectedCategory = cat.name"
-            class="w-full text-left px-3 py-2 rounded-xl text-sm transition-all duration-200"
-            :class="selectedCategory === cat.name 
-              ? 'bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 text-blue-700 dark:text-blue-300 font-semibold shadow-sm' 
-              : 'text-[var(--text-secondary)] hover:bg-gray-50 dark:hover:bg-white/5'">
-            <div class="flex items-center justify-between">
-              <span class="truncate text-xs">{{ (cat as any).name_zh || cat.name }}</span>
-              <span class="text-[10px] tabular-nums font-mono opacity-40 flex-shrink-0">{{ cat.count }}</span>
-            </div>
-          </button>
-        </div>
-      </div>
-
-      <!-- Tool Grid -->
-      <div class="flex-1 overflow-y-auto p-5" ref="gridContainer">
-        <!-- Skeleton Loading -->
-        <div v-if="scienceLoading" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 max-w-[1800px] mx-auto">
-          <div v-for="i in 12" :key="i" class="rounded-xl border border-gray-100 dark:border-gray-800 bg-white dark:bg-[#1e1e1e] p-4 animate-pulse">
-            <div class="flex items-start gap-3 mb-3">
-              <div class="size-10 rounded-xl bg-gray-200 dark:bg-gray-700"></div>
-              <div class="flex-1 space-y-2"><div class="h-4 bg-gray-200 dark:bg-gray-700 rounded w-3/4"></div><div class="h-3 bg-gray-100 dark:bg-gray-800 rounded w-1/2"></div></div>
-            </div>
-            <div class="space-y-2"><div class="h-3 bg-gray-100 dark:bg-gray-800 rounded"></div><div class="h-3 bg-gray-100 dark:bg-gray-800 rounded w-5/6"></div></div>
-          </div>
-        </div>
-
-        <!-- Tool Cards -->
-        <div v-else class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 max-w-[1800px] mx-auto">
-          <div 
-            v-for="(tool, idx) in displayedScienceTools" :key="tool.name"
-            class="tool-card group relative rounded-xl border border-gray-100 dark:border-gray-800 bg-white dark:bg-[#1e1e1e] cursor-pointer overflow-hidden"
-            :style="{ '--delay': `${Math.min(idx, 20) * 30}ms` }"
-            @click="openScienceTool(tool)"
-          >
-            <!-- Hover glow -->
-            <div class="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none">
-              <div class="absolute -inset-px rounded-xl bg-gradient-to-r from-blue-400/20 via-indigo-400/20 to-purple-400/20"></div>
-            </div>
-
-            <div class="relative p-4">
-              <div class="flex items-start gap-3 mb-2.5">
-                <div class="size-10 rounded-xl flex items-center justify-center text-white text-sm font-bold flex-shrink-0 shadow-lg transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3"
-                  :style="{ background: getToolGradient(tool.name) }">
-                  {{ tool.name.charAt(0) }}
-                </div>
-                <div class="min-w-0 flex-1">
-                  <h3 class="text-sm font-semibold text-[var(--text-primary)] truncate group-hover:text-transparent group-hover:bg-clip-text group-hover:bg-gradient-to-r group-hover:from-blue-600 group-hover:to-indigo-600 transition-all duration-300">
-                    {{ tool.name }}
-                  </h3>
-                  <span class="inline-block mt-0.5 text-[10px] px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-[var(--text-tertiary)] font-mono">{{ tool.category || 'tool' }}</span>
-                </div>
-              </div>
-              <p class="text-xs text-[var(--text-secondary)] leading-relaxed line-clamp-2 min-h-[2.5rem]">
-                {{ tool.description || 'No description available' }}
+            <div>
+              <h1 class="text-3xl font-semibold text-white">Tool Cartography</h1>
+              <p class="mt-2 max-w-3xl text-sm leading-7 text-white/75">
+                Browse science and external tools by discipline first, then narrow within each slice by function group while keeping personal categories as a separate overlay.
               </p>
-              <div class="mt-3 flex items-center justify-between">
-                <div class="flex items-center gap-2">
-                  <span v-if="paramCount(tool) > 0" class="flex items-center gap-1 text-[10px] text-[var(--text-tertiary)]">
-                    <svg class="size-3 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h7" /></svg>
-                    {{ paramCount(tool) }} params
-                  </span>
-                  <span v-if="tool.has_examples" class="size-1.5 rounded-full bg-green-400" title="Has examples"></span>
-                </div>
-                <div class="text-[10px] text-blue-500 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-1 group-hover:translate-x-0 flex items-center gap-0.5">
-                  Open <svg class="size-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
-                </div>
-              </div>
             </div>
           </div>
-        </div>
 
-        <!-- Load more -->
-        <div v-if="!scienceLoading && filteredScienceTools.length > displayLimit" class="flex justify-center mt-8 mb-4">
-          <button @click="displayLimit += 100"
-            class="group px-6 py-2.5 text-sm font-medium text-blue-600 dark:text-blue-400 bg-white dark:bg-[#1e1e1e] rounded-xl border border-blue-200 dark:border-blue-800 hover:border-blue-400 hover:shadow-lg hover:shadow-blue-500/10 transition-all duration-300">
-            <span class="flex items-center gap-2">
-              Show more
-              <span class="text-xs opacity-50">({{ filteredScienceTools.length - displayLimit }} remaining)</span>
-              <svg class="size-4 opacity-50 group-hover:translate-y-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
-            </span>
-          </button>
-        </div>
-
-        <!-- Empty State -->
-        <div v-if="!scienceLoading && displayedScienceTools.length === 0" class="flex flex-col items-center justify-center py-20 gap-3">
-          <div class="size-16 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
-            <Search :size="28" class="text-gray-300 dark:text-gray-600" />
-          </div>
-          <p class="text-sm text-[var(--text-tertiary)]">No tools match "{{ searchQuery }}"</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- External Tools Tab -->
-    <div v-else-if="activeTab === 'external'" class="flex-1 overflow-y-auto p-5 bg-[#f8f9fb] dark:bg-[#111]">
-      <div v-if="externalTools.length === 0 && !extLoading" class="flex flex-col items-center justify-center h-full text-[var(--text-tertiary)] gap-3">
-        <div class="size-16 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
-          <Box :size="28" class="text-gray-300 dark:text-gray-600" />
-        </div>
-        <span class="text-sm">{{ t('No external tools installed') }}</span>
-        <p class="text-xs opacity-60">Install tools via Skills or the sandbox CLI</p>
-      </div>
-      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 max-w-[1800px] mx-auto">
-        <div v-for="(tool, idx) in filteredExtTools" :key="tool.name"
-          class="tool-card group relative rounded-xl border border-gray-100 dark:border-gray-800 bg-white dark:bg-[#1e1e1e] cursor-pointer overflow-hidden"
-          :style="{ '--delay': `${Math.min(idx, 20) * 30}ms` }"
-          @click="router.push(`/chat/tools/${tool.name}`)">
-          <!-- Hover glow -->
-          <div class="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none">
-            <div class="absolute -inset-px rounded-xl bg-gradient-to-r from-emerald-400/20 via-teal-400/20 to-cyan-400/20"></div>
-          </div>
-          <div class="relative p-4">
-            <div class="flex items-start gap-3 mb-2.5">
-              <div class="size-10 rounded-xl flex items-center justify-center text-white text-sm font-bold flex-shrink-0 shadow-lg transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3"
-                :style="{ background: getToolGradient(tool.name) }">
-                {{ tool.name.charAt(0).toUpperCase() }}
-              </div>
-              <div class="min-w-0 flex-1">
-                <h3 class="text-sm font-semibold text-[var(--text-primary)] truncate group-hover:text-transparent group-hover:bg-clip-text group-hover:bg-gradient-to-r group-hover:from-emerald-600 group-hover:to-teal-600 transition-all duration-300">{{ tool.name }}</h3>
-                <span class="inline-block mt-0.5 text-[10px] px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-[var(--text-tertiary)] font-mono">{{ tool.file }}</span>
-              </div>
-              <div class="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button @click.stop="handleToggleBlock(tool)" class="p-1.5 rounded-lg transition-colors"
-                  :class="tool.blocked ? 'text-amber-500 bg-amber-50 dark:bg-amber-900/20' : 'text-[var(--text-tertiary)] hover:bg-gray-100 dark:hover:bg-gray-800'">
-                  <EyeOff v-if="tool.blocked" :size="13" /><Eye v-else :size="13" />
-                </button>
-                <button @click.stop="confirmDeleteTool(tool)" class="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 transition-colors">
-                  <Trash2 :size="13" />
-                </button>
-              </div>
-            </div>
-            <p class="text-xs text-[var(--text-secondary)] leading-relaxed line-clamp-2 min-h-[2.5rem]">{{ tool.description || 'No description' }}</p>
-            <div class="mt-3 flex items-center justify-between">
-              <span v-if="tool.blocked" class="text-[10px] px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 font-medium">Blocked</span>
-              <span v-else class="text-[10px] text-[var(--text-tertiary)]">Custom tool</span>
-              <div class="text-[10px] text-emerald-500 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-1 group-hover:translate-x-0 flex items-center gap-0.5">
-                Open <svg class="size-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Delete Dialog -->
-    <Teleport to="body">
-      <Transition name="modal">
-        <div v-if="deleteTarget" class="fixed inset-0 z-[9999] flex items-center justify-center">
-          <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" @click="cancelDelete"></div>
-          <div class="relative bg-white dark:bg-[#2a2a2a] rounded-2xl shadow-2xl p-6 w-[380px] z-10">
-            <div class="flex items-center gap-3 mb-4">
-              <div class="size-10 rounded-xl bg-red-50 dark:bg-red-900/20 flex items-center justify-center">
-                <Trash2 :size="20" class="text-red-500" />
-              </div>
-              <div><h3 class="text-sm font-semibold">Delete "{{ deleteTarget.name }}"?</h3><p class="text-xs text-[var(--text-tertiary)]">This action cannot be undone</p></div>
-            </div>
-            <div class="flex justify-end gap-2">
-              <button @click="cancelDelete" class="px-4 py-2 text-sm rounded-lg border border-[var(--border-light)] hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">Cancel</button>
-              <button @click="executeDelete" :disabled="deleting" class="px-4 py-2 text-sm rounded-lg bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 transition-all">
-                {{ deleting ? 'Deleting...' : 'Delete' }}
+          <div class="w-full max-w-xl rounded-[28px] border border-white/10 bg-white/10 p-3 backdrop-blur-xl">
+            <div class="flex flex-wrap items-center gap-2">
+              <button
+                v-for="tab in tabs"
+                :key="tab.id"
+                type="button"
+                class="inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-medium transition"
+                :class="activeTab === tab.id ? 'bg-white text-slate-900 shadow-lg shadow-black/10' : 'bg-white/5 text-white/80 hover:bg-white/10 hover:text-white'"
+                @click="activeTab = tab.id"
+              >
+                <span>{{ tab.label }}</span>
+                <span class="rounded-full px-2 py-0.5 text-[11px]" :class="activeTab === tab.id ? 'bg-slate-900/10 text-slate-700' : 'bg-white/10 text-white/80'">
+                  {{ tab.count }}
+                </span>
               </button>
             </div>
+
+            <div class="mt-3">
+              <input
+                v-model="searchQuery"
+                type="text"
+                class="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white placeholder:text-white/40 focus:border-white/20 focus:bg-white/15 focus:outline-none"
+                :placeholder="`Search ${activeTab === 'science' ? 'science' : 'external'} tools`"
+              >
+            </div>
           </div>
         </div>
-      </Transition>
-    </Teleport>
+      </div>
+    </header>
+
+    <div class="min-h-0 flex-1 p-3 md:p-4">
+      <div class="flex h-full min-h-0 overflow-hidden rounded-[32px] border border-[var(--border-light)] bg-white/75 shadow-xl shadow-black/5 dark:bg-[#121212]">
+        <ToolLibrarySidebar
+          :region-label="currentRegionLabel"
+          :description="currentDescription"
+          :browse-source="currentBrowseSource"
+          :system-options="disciplineOptions"
+          :custom-category-options="customCategoryOptions"
+          :custom-subcategory-options="customSubcategoryOptions"
+          :custom-category-assignment-totals="customCategoryAssignmentTotals"
+          :active-discipline="filters[activeTab].system.discipline"
+          :active-custom-category-id="filters[activeTab].custom.categoryId"
+          :active-custom-subcategory-id="filters[activeTab].custom.subcategoryId"
+          :total-count="activeRegionTotal"
+          :uncategorized-count="uncategorizedCount"
+          :category-summary="categorySummary"
+          @manage-categories="manageCategoriesOpen = true"
+          @select-browse-source="setBrowseSource(activeTab, $event)"
+          @select-custom-category="setCustomCategory(activeTab, $event)"
+          @select-custom-subcategory="setCustomSubcategory(activeTab, $event)"
+          @select-discipline="setDiscipline(activeTab, $event)"
+          @delete-custom-categories="handleDeleteCustomCategories"
+        />
+
+        <ToolLibraryGrid
+          :title="gridTitle"
+          :subtitle="gridSubtitle"
+          :loading="currentLoading"
+          :cards="currentCards"
+          :selected-names="currentSelection"
+          :browse-source="currentBrowseSource"
+          :active-slice-label="activeSliceLabel"
+          :active-subslice-label="activeSubsliceLabel"
+          :system-function-group-options="systemFunctionGroupOptions"
+          :active-function-group="filters[activeTab].system.functionGroup"
+          :custom-category-options="customCategoryOptions"
+          :active-custom-category-id="filters[activeTab].custom.categoryId"
+          :custom-subcategory-options="customSubcategoryOptions"
+          :active-custom-subcategory-id="filters[activeTab].custom.subcategoryId"
+          :uncategorized-count="uncategorizedCount"
+          @assign-card="handleAssignCard"
+          @assign-selected="handleAssignSelection"
+          @create-category-selected="handleCreateCategoryFromSelection"
+          @clear-card="clearAssignments($event.toolKind, [$event.name])"
+          @clear-selected="clearAssignments(activeTab, [...currentSelection])"
+          @delete-card="deleteExternalTool($event)"
+          @manage-categories="manageCategoriesOpen = true"
+          @open-card="openTool"
+          @refresh="refreshCurrentTab"
+          @reset-filters="resetFilters(activeTab)"
+          @set-custom-category="setCustomCategory(activeTab, $event)"
+          @set-custom-subcategory="setCustomSubcategory(activeTab, $event)"
+          @set-function-group="setFunctionGroup(activeTab, $event)"
+          @toggle-block="toggleExternalToolBlock($event)"
+          @toggle-select="toggleToolSelection(activeTab, $event)"
+          @toggle-visible="toggleVisibleSelection(activeTab)"
+        />
+      </div>
+    </div>
+
+    <Dialog :open="manageCategoriesOpen" @update:open="manageCategoriesOpen = $event">
+      <DialogContent class="w-[min(1180px,96vw)] max-h-[88vh] overflow-hidden border border-[var(--border-light)] bg-[var(--background-gray-main)] p-0">
+        <ToolLibraryCategoryManager
+          :categories="preferences.custom_categories"
+          :assignment-stats="categoryAssignmentStats"
+          :discipline-presets="disciplineOptions"
+          :function-group-presets="allFunctionGroupPresets"
+          :current-slice-label="activeDiscipline?.labelZh || ''"
+          :current-slice-children="systemFunctionGroupOptions"
+          :selected-tool-count="currentSelectedCount"
+          :selected-tool-names="currentSelection"
+          :visible-tool-names="currentCards.map((card) => card.name)"
+          :active-function-group-label="activeSystemFunctionGroupLabel"
+          :active-search-query="searchQuery"
+          :region-label="currentRegionLabel"
+          @close="manageCategoriesOpen = false"
+          @save="handleSaveCategories"
+        />
+      </DialogContent>
+    </Dialog>
+
+    <Dialog :open="assignmentOpen" @update:open="handleAssignmentDialogOpenChange">
+      <DialogContent class="w-[min(680px,94vw)] border border-[var(--border-light)] bg-[var(--background-gray-main)] p-0">
+        <div class="px-5 py-5">
+          <ToolLibraryAssignmentDialog
+            :categories="preferences.custom_categories"
+            :kind="assignmentTarget.kind"
+            :tool-names="assignmentTarget.toolNames"
+            :initial-category-id="assignmentTarget.categoryId"
+            :initial-subcategory-id="assignmentTarget.subcategoryId"
+            :initial-create-open="assignmentCreateMode"
+            :create-categories="handleInlineCreateCategories"
+            @cancel="handleCloseAssignment"
+            @submit="handleSubmitAssignment"
+          />
+        </div>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue';
-import { Search, Eye, EyeOff, Trash2, Box, FileCode } from 'lucide-vue-next';
-import { getTools, blockTool, deleteTool as apiDeleteTool } from '../api/agent';
-import { listTUTools, TUTool, TUCategory } from '../api/tooluniverse';
-import { ExternalToolItem } from '../types/response';
-import { useRouter } from 'vue-router';
-import { useI18n } from 'vue-i18n';
+import { computed, onMounted, ref } from 'vue';
+import type { ToolLibraryCategory } from '../api/toolLibrary';
+import Dialog from '../components/ui/dialog/Dialog.vue';
+import DialogContent from '../components/ui/dialog/DialogContent.vue';
+import { UNCATEGORIZED_CATEGORY_ID } from '../components/toolLibrary/browseHelpers';
+import ToolLibraryAssignmentDialog from '../components/toolLibrary/ToolLibraryAssignmentDialog.vue';
+import ToolLibraryCategoryManager from '../components/toolLibrary/ToolLibraryCategoryManager.vue';
+import ToolLibraryGrid from '../components/toolLibrary/ToolLibraryGrid.vue';
+import ToolLibrarySidebar from '../components/toolLibrary/ToolLibrarySidebar.vue';
+import { resolveCategorySelection } from '../components/toolLibrary/categoryBuilder';
+import type { TaxonomyOption, ToolCard } from '../components/toolLibrary/types';
+import { useToolLibrary } from '../components/toolLibrary/useToolLibrary';
 
-const { t, locale } = useI18n();
-const router = useRouter();
+const {
+  activeTab,
+  assignmentOpen,
+  assignmentTarget,
+  activeCustomCategory,
+  activeCustomSubcategory,
+  activeDiscipline,
+  categoryAssignmentStats,
+  categorySummary,
+  currentBrowseSource,
+  currentCards,
+  currentDescription,
+  currentLoading,
+  currentRegionLabel,
+  currentSelectedCount,
+  currentSelection,
+  customCategoryOptions,
+  customSubcategoryOptions,
+  disciplineOptions,
+  externalTools,
+  filters,
+  loadAll,
+  manageCategoriesOpen,
+  openCardAssignment,
+  openSelectedAssignment,
+  openTool,
+  preferences,
+  refreshCurrentTab,
+  resetFilters,
+  saveCategories,
+  searchQuery,
+  scienceTools,
+  setBrowseSource,
+  setCustomCategory,
+  setCustomSubcategory,
+  setDiscipline,
+  setFunctionGroup,
+  submitAssignment,
+  systemFunctionGroupOptions,
+  toggleExternalToolBlock,
+  toggleToolSelection,
+  toggleVisibleSelection,
+  clearAssignments,
+  deleteExternalTool,
+  uncategorizedCount,
+} = useToolLibrary();
 
 const tabs = computed(() => [
-  { id: 'science', label: 'Science', count: scienceToolsTotal.value },
-  { id: 'external', label: 'External', count: externalTools.value.length },
+  { id: 'science' as const, label: 'Science', count: scienceTools.value.length },
+  { id: 'external' as const, label: 'External', count: externalTools.value.length },
 ]);
-const activeTab = ref('science');
-const searchQuery = ref('');
-const selectedCategory = ref('');
-const displayLimit = ref(100);
 
-const scienceTools = ref<TUTool[]>([]);
-const scienceCategories = ref<TUCategory[]>([]);
-const scienceToolsTotal = ref(0);
-const scienceLoading = ref(false);
-const externalTools = ref<ExternalToolItem[]>([]);
-const extLoading = ref(false);
+const assignmentCreateMode = ref(false);
 
-const gradientPalette = [
-  'linear-gradient(135deg, #6366f1, #8b5cf6)',
-  'linear-gradient(135deg, #3b82f6, #6366f1)',
-  'linear-gradient(135deg, #06b6d4, #3b82f6)',
-  'linear-gradient(135deg, #10b981, #06b6d4)',
-  'linear-gradient(135deg, #f59e0b, #ef4444)',
-  'linear-gradient(135deg, #ec4899, #8b5cf6)',
-  'linear-gradient(135deg, #14b8a6, #22c55e)',
-  'linear-gradient(135deg, #f97316, #f59e0b)',
-];
+const activeRegionTotal = computed(() => activeTab.value === 'science' ? scienceTools.value.length : externalTools.value.length);
 
-const getToolGradient = (name: string) => {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  return gradientPalette[Math.abs(hash) % gradientPalette.length];
-};
-
-const paramCount = (tool: TUTool) => tool.param_count || 0;
-
-const filteredScienceTools = computed(() => {
-  let list = scienceTools.value;
-  if (selectedCategory.value) list = list.filter(t => t.category === selectedCategory.value);
-  if (searchQuery.value) {
-    const q = searchQuery.value.toLowerCase();
-    list = list.filter(t => t.name.toLowerCase().includes(q) || (t.description || '').toLowerCase().includes(q));
-  }
-  return list;
-});
-
-const displayedScienceTools = computed(() => filteredScienceTools.value.slice(0, displayLimit.value));
-
-const filteredExtTools = computed(() => {
-  if (!searchQuery.value) return externalTools.value;
-  return externalTools.value.filter(t => t.name.toLowerCase().includes(searchQuery.value.toLowerCase()));
-});
-
-let searchTimer: ReturnType<typeof setTimeout> | null = null;
-const onSearchInput = () => { if (searchTimer) clearTimeout(searchTimer); searchTimer = setTimeout(() => { displayLimit.value = 100; }, 200); };
-
-const openScienceTool = (tool: TUTool) => { router.push(`/chat/science-tools/${encodeURIComponent(tool.name)}`); };
-
-const loadScienceTools = async () => {
-  scienceLoading.value = true;
-  try {
-    const res = await listTUTools();
-    scienceTools.value = res.tools;
-    scienceToolsTotal.value = res.total;
-    const catCounts: Record<string, number> = {};
-    const catZh: Record<string, string> = {};
-    for (const t of res.tools) {
-      const c = t.category || 'other';
-      catCounts[c] = (catCounts[c] || 0) + 1;
-      if (t.category_zh) catZh[c] = t.category_zh;
+const gridTitle = computed(() => {
+  if (currentBrowseSource.value === 'custom') {
+    const categoryId = filters[activeTab.value].custom.categoryId;
+    if (!categoryId) {
+      return `All ${currentRegionLabel.value} Tools`;
     }
-    scienceCategories.value = Object.entries(catCounts).sort().map(([name, count]) => ({
-      name, count, name_zh: catZh[name] || '',
-    }));
-  } catch (e) { console.error('Failed to load science tools', e); }
-  finally { scienceLoading.value = false; }
-};
+    if (categoryId === UNCATEGORIZED_CATEGORY_ID) {
+      return `Uncategorized ${currentRegionLabel.value} Tools`;
+    }
+    if (activeCustomSubcategory.value?.labelZh) {
+      return `${activeCustomCategory.value?.labelZh || 'My Category'} | ${activeCustomSubcategory.value.labelZh}`;
+    }
+    return activeCustomCategory.value?.labelZh || `All ${currentRegionLabel.value} Tools`;
+  }
 
-onMounted(async () => {
-  extLoading.value = true;
-  const [, extRes] = await Promise.allSettled([loadScienceTools(), getTools()]);
-  if (extRes.status === 'fulfilled') externalTools.value = extRes.value;
-  extLoading.value = false;
+  if (!filters[activeTab.value].system.discipline) {
+    return `All ${currentRegionLabel.value} Tools`;
+  }
+  const discipline = activeDiscipline.value;
+  if (!discipline) {
+    return `All ${currentRegionLabel.value} Tools`;
+  }
+  if (activeSystemFunctionGroupLabel.value) {
+    return `${discipline.labelZh} | ${activeSystemFunctionGroupLabel.value}`;
+  }
+  return discipline.labelZh;
 });
 
-watch(selectedCategory, () => { displayLimit.value = 100; });
-watch(locale, () => { loadScienceTools(); });
+const gridSubtitle = computed(() => {
+  if (currentBrowseSource.value === 'custom') {
+    const categoryId = filters[activeTab.value].custom.categoryId;
+    if (!categoryId) {
+      return 'Browse the full region through your own category system, then narrow with your category chips whenever you want.';
+    }
+    if (categoryId === UNCATEGORIZED_CATEGORY_ID) {
+      return 'These tools are still waiting for a custom assignment, so this view helps you quickly tidy up your personal organization.';
+    }
+    if (!filters[activeTab.value].custom.subcategoryId) {
+      return customSubcategoryOptions.value.length
+        ? 'Subcategory chips narrow this custom category without leaving your personal browse track.'
+        : 'This custom category currently has no subcategories, so every assigned tool stays in one bucket.';
+    }
+    return 'Showing the tools assigned to this exact custom category slice.';
+  }
 
-const handleToggleBlock = async (tool: ExternalToolItem) => {
-  try { await blockTool(tool.name, !tool.blocked); tool.blocked = !tool.blocked; } catch (e) { console.error(e); }
-};
-const deleteTarget = ref<ExternalToolItem | null>(null);
-const deleting = ref(false);
-const confirmDeleteTool = (tool: ExternalToolItem) => { deleteTarget.value = tool; };
-const cancelDelete = () => { if (!deleting.value) deleteTarget.value = null; };
-const executeDelete = async () => {
-  if (!deleteTarget.value) return; deleting.value = true;
-  try { await apiDeleteTool(deleteTarget.value.name); externalTools.value = externalTools.value.filter(t => t.name !== deleteTarget.value!.name); deleteTarget.value = null; }
-  catch (e) { console.error(e); } finally { deleting.value = false; }
-};
+  if (!filters[activeTab.value].system.discipline) {
+    return 'Browse every tool by the system taxonomy, or narrow the full region immediately with the function-group chips.';
+  }
+  if (!systemFunctionGroupOptions.value.length) {
+    return 'This discipline does not need a secondary function-group slice right now.';
+  }
+  return 'Function-group chips narrow this discipline slice without changing the top-level browse axis.';
+});
+
+const activeSystemDisciplineLabel = computed(() =>
+  activeDiscipline.value?.labelZh || 'All Disciplines'
+);
+
+const activeSystemFunctionGroupLabel = computed(() =>
+  systemFunctionGroupOptions.value.find((option) => option.id === filters[activeTab.value].system.functionGroup)?.labelZh || ''
+);
+
+const activeCustomCategoryLabel = computed(() => {
+  const categoryId = filters[activeTab.value].custom.categoryId;
+  if (categoryId === UNCATEGORIZED_CATEGORY_ID) {
+    return 'Uncategorized';
+  }
+  return activeCustomCategory.value?.labelZh || 'All Categories';
+});
+
+const activeSliceLabel = computed(() =>
+  currentBrowseSource.value === 'custom' ? activeCustomCategoryLabel.value : activeSystemDisciplineLabel.value
+);
+
+const activeSubsliceLabel = computed(() =>
+  currentBrowseSource.value === 'custom'
+    ? activeCustomSubcategory.value?.labelZh || ''
+    : activeSystemFunctionGroupLabel.value
+);
+
+const customCategoryAssignmentTotals = computed(() => {
+  const totals = new Map<string, number>();
+  for (const [categoryId, stats] of categoryAssignmentStats.value.entries()) {
+    totals.set(categoryId, stats.total);
+  }
+  return totals;
+});
+
+const allFunctionGroupPresets = computed(() => {
+  const seen = new Map<string, TaxonomyOption>();
+  for (const kind of ['science', 'external'] as const) {
+    for (const card of kind === 'science' ? currentAllScienceCards.value : currentAllExternalCards.value) {
+      if (!seen.has(card.functionGroup)) {
+        seen.set(card.functionGroup, {
+          id: card.functionGroup,
+          label: card.functionGroup,
+          labelZh: card.functionGroupLabel,
+          count: 0,
+        });
+      }
+      const entry = seen.get(card.functionGroup)!;
+      entry.count += 1;
+    }
+  }
+  return Array.from(seen.values()).sort((left, right) => left.labelZh.localeCompare(right.labelZh, 'zh-Hans-CN'));
+});
+
+const currentAllScienceCards = computed(() => scienceTools.value.map((tool) => ({
+  functionGroup: tool.function_group || tool.system_group || 'analysis_workflow',
+  functionGroupLabel: tool.function_group_zh || tool.system_group_zh || tool.function_group || tool.system_group || 'analysis_workflow',
+})));
+const currentAllExternalCards = computed(() => externalTools.value.map((tool) => ({
+  functionGroup: tool.function_group || tool.system_group || 'analysis_workflow',
+  functionGroupLabel: tool.function_group_zh || tool.system_group_zh || tool.function_group || tool.system_group || 'analysis_workflow',
+})));
+
+function handleAssignCard(card: ToolCard): void {
+  assignmentCreateMode.value = false;
+  openCardAssignment(card);
+}
+
+function handleAssignSelection(): void {
+  assignmentCreateMode.value = false;
+  openSelectedAssignment();
+}
+
+function handleCreateCategoryFromSelection(): void {
+  assignmentCreateMode.value = true;
+  openSelectedAssignment();
+}
+
+function handleCloseAssignment(): void {
+  assignmentCreateMode.value = false;
+  assignmentOpen.value = false;
+}
+
+function handleAssignmentDialogOpenChange(nextOpen: boolean): void {
+  assignmentOpen.value = nextOpen;
+  if (!nextOpen) {
+    assignmentCreateMode.value = false;
+  }
+}
+
+function handleSubmitAssignment(payload: { categoryId: string; subcategoryId: string }): void {
+  assignmentCreateMode.value = false;
+  submitAssignment({
+    kind: assignmentTarget.value.kind,
+    toolNames: assignmentTarget.value.toolNames,
+    categoryId: payload.categoryId,
+    subcategoryId: payload.subcategoryId,
+  });
+}
+
+function handleSaveCategories(payload: { categories: ToolLibraryCategory[]; quickAssignCategoryId: string }): void {
+  const quickAssign = payload.quickAssignCategoryId && currentSelection.value.length
+    ? {
+        kind: activeTab.value,
+        toolNames: [...currentSelection.value],
+        categoryId: payload.quickAssignCategoryId,
+        subcategoryId: '',
+      }
+    : undefined;
+  saveCategories(payload.categories, quickAssign);
+}
+
+function handleDeleteCustomCategories(categoryIds: string[]): void {
+  const uniqueIds = Array.from(new Set(categoryIds)).filter((categoryId) =>
+    preferences.value.custom_categories.some((category) => category.id === categoryId),
+  );
+  if (!uniqueIds.length) {
+    return;
+  }
+
+  const categoryNames = preferences.value.custom_categories
+    .filter((category) => uniqueIds.includes(category.id))
+    .map((category) => category.name);
+  const affectedAssignments = uniqueIds.reduce(
+    (total, categoryId) => total + (categoryAssignmentStats.value.get(categoryId)?.total || 0),
+    0,
+  );
+  const categoryLabel = uniqueIds.length === 1
+    ? `Delete "${categoryNames[0]}"?`
+    : `Delete ${uniqueIds.length} categories?`;
+  const assignmentLabel = `${affectedAssignments} assignment${affectedAssignments === 1 ? '' : 's'} will be cleared.`;
+  const previewLabel = categoryNames.slice(0, 3).join(', ');
+  const extraLabel = categoryNames.length > 3 ? ` and ${categoryNames.length - 3} more` : '';
+  const confirmed = window.confirm(`${categoryLabel}\n\n${assignmentLabel}\n${previewLabel}${extraLabel}`);
+  if (!confirmed) {
+    return;
+  }
+
+  saveCategories(
+    preferences.value.custom_categories.filter((category) => !uniqueIds.includes(category.id)),
+  );
+}
+
+async function handleInlineCreateCategories(payload: {
+  categories: ToolLibraryCategory[];
+  categoryName: string;
+  subcategoryName: string;
+}): Promise<{ categoryId: string; subcategoryId: string }> {
+  const saved = await saveCategories(payload.categories);
+  if (!saved) {
+    throw new Error('Failed to save the inline category draft.');
+  }
+
+  const selection = resolveCategorySelection(
+    saved.custom_categories,
+    payload.categoryName,
+    payload.subcategoryName,
+  );
+
+  if (!selection.categoryId) {
+    throw new Error('The new category could not be found after saving.');
+  }
+
+  return selection;
+}
+
+onMounted(loadAll);
 </script>
-
-<style scoped>
-.line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-
-/* Card stagger entry animation */
-.tool-card {
-  animation: cardFadeIn 0.4s ease-out both;
-  animation-delay: var(--delay, 0ms);
-}
-@keyframes cardFadeIn {
-  from { opacity: 0; transform: translateY(12px) scale(0.97); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-/* Hover lift */
-.tool-card:hover { transform: translateY(-2px); box-shadow: 0 12px 28px -8px rgba(0,0,0,0.08), 0 4px 12px -4px rgba(0,0,0,0.04); }
-
-/* Modal transitions */
-.modal-enter-active { transition: all 0.25s ease-out; }
-.modal-leave-active { transition: all 0.2s ease-in; }
-.modal-enter-from, .modal-leave-to { opacity: 0; }
-.modal-enter-from > div:last-child { transform: scale(0.95) translateY(10px); }
-.modal-leave-to > div:last-child { transform: scale(0.95) translateY(10px); }
-
-/* Custom scrollbar */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #e0e0e0; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #ccc; }
-</style>

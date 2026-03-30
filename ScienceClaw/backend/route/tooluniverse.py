@@ -18,6 +18,15 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 
+from backend.route.sessions import (
+    _TOOLS_DIR as _SESSIONS_TOOLS_DIR,
+    _external_proxy_map,
+    _normalize_external_result,
+    _parse_external_tool_file,
+    _tool_schema_json,
+    _validate_external_arguments,
+)
+from backend.tool_library_taxonomy import DISCIPLINE_LABELS, classify_science_tool
 from backend.user.dependencies import require_user, User
 
 logger = logging.getLogger(__name__)
@@ -27,6 +36,8 @@ router = APIRouter(prefix="/tooluniverse", tags=["tooluniverse"])
 
 _tu = None
 _tu_loading = False
+_TOOLS_DIR = Path(_SESSIONS_TOOLS_DIR)
+_SCIENCE_LIBRARY_TARGET = "science"
 
 
 def _get_tu():
@@ -47,6 +58,118 @@ def _get_tu():
         logger.error(f"[TU-API] Failed to load ToolUniverse: {exc}")
         _tu_loading = False
         return None
+
+
+def _science_overlay_taxonomy(name: str, category: str, subcategory: str, description: str) -> Dict[str, Any]:
+    return classify_science_tool(
+        name=name,
+        raw_category=category,
+        description=" ".join(part for part in [subcategory, description] if part),
+        tool_type=subcategory or "local_proxy",
+    )
+
+
+def _build_science_overlay_spec(py_file: Path, meta: Dict[str, Any], proxy: Any) -> Dict[str, Any]:
+    schema = _tool_schema_json(proxy)
+    props = schema.get("properties", {}) if isinstance(schema, dict) else {}
+    required = schema.get("required", []) if isinstance(schema, dict) else []
+    taxonomy = _science_overlay_taxonomy(
+        name=py_file.stem,
+        category=str(meta.get("category", "")),
+        subcategory=str(meta.get("subcategory", "")),
+        description=str(meta.get("description", "")),
+    )
+    return {
+        "name": py_file.stem,
+        "description": str(meta.get("description", "")),
+        "parameters": schema,
+        "test_examples": [],
+        "return_schema": None,
+        "category": str(meta.get("category", "")),
+        "tool_type": str(meta.get("subcategory", "")) or "local_proxy",
+        "family": _derive_tool_family(py_file.stem),
+        "action": _derive_tool_action(py_file.stem),
+        "source_file": str(py_file),
+        "runner": "structured_proxy",
+        "param_count": len(props) if isinstance(props, dict) else 0,
+        "required_params": required if isinstance(required, list) else [],
+        "has_examples": False,
+        "has_return_schema": False,
+        **taxonomy,
+    }
+
+
+def _list_science_overlay_tools(force_reload: bool = False) -> List[Dict[str, Any]]:
+    if not _TOOLS_DIR.is_dir():
+        return []
+
+    proxies = _external_proxy_map(force_reload=force_reload)
+    overlay_tools: List[Dict[str, Any]] = []
+
+    for py_file in sorted(_TOOLS_DIR.glob("*.py")):
+        if py_file.name == "__init__.py":
+            continue
+        meta = _parse_external_tool_file(py_file)
+        if meta.get("library_target") != _SCIENCE_LIBRARY_TARGET:
+            continue
+
+        proxy = proxies.get(meta.get("tool_name") or py_file.stem) or proxies.get(py_file.stem)
+        if proxy is None:
+            logger.warning("[TU-API] Science overlay tool missing proxy: %s", py_file.stem)
+            continue
+
+        spec = _build_science_overlay_spec(py_file, meta, proxy)
+        overlay_tools.append(
+            {
+                "name": spec["name"],
+                "description": spec["description"],
+                "category": spec["category"],
+                "tool_type": spec["tool_type"],
+                "family": spec["family"],
+                "action": spec["action"],
+                "function_group": spec["function_group"],
+                "function_group_zh": spec["function_group_zh"],
+                "discipline": spec["discipline"],
+                "discipline_zh": spec["discipline_zh"],
+                "system_group": spec["system_group"],
+                "system_group_zh": spec["system_group_zh"],
+                "system_subgroup": spec["system_subgroup"],
+                "system_subgroup_zh": spec["system_subgroup_zh"],
+                "param_count": spec["param_count"],
+                "required_params": spec["required_params"],
+                "has_examples": spec["has_examples"],
+                "has_return_schema": spec["has_return_schema"],
+                "source_file": spec["source_file"],
+                "runner": spec["runner"],
+            }
+        )
+
+    return overlay_tools
+
+
+def _science_overlay_spec_map(force_reload: bool = False) -> Dict[str, Dict[str, Any]]:
+    if not _TOOLS_DIR.is_dir():
+        return {}
+
+    proxies = _external_proxy_map(force_reload=force_reload)
+    result: Dict[str, Dict[str, Any]] = {}
+
+    for py_file in sorted(_TOOLS_DIR.glob("*.py")):
+        if py_file.name == "__init__.py":
+            continue
+        meta = _parse_external_tool_file(py_file)
+        if meta.get("library_target") != _SCIENCE_LIBRARY_TARGET:
+            continue
+
+        proxy = proxies.get(meta.get("tool_name") or py_file.stem) or proxies.get(py_file.stem)
+        if proxy is None:
+            continue
+
+        spec = _build_science_overlay_spec(py_file, meta, proxy)
+        spec["_proxy"] = proxy
+        result[spec["name"]] = spec
+
+    return result
 
 
 # ── 翻译文件加载 ──────────────────────────────────────────────────
@@ -149,6 +272,29 @@ def _sanitize(text: str) -> str:
     return _CTRL_RE.sub('', text) if text else ""
 
 
+def _derive_tool_family(name: str) -> str:
+    raw = str(name or "").strip()
+    if not raw:
+        return ""
+    for delimiter in ("_", "-"):
+        if delimiter in raw:
+            prefix = raw.split(delimiter, 1)[0].strip()
+            if prefix:
+                return prefix
+    return raw
+
+
+def _derive_tool_action(name: str) -> str:
+    raw = str(name or "").strip()
+    if not raw:
+        return ""
+    for delimiter in ("_", "-"):
+        parts = [part.strip() for part in raw.split(delimiter) if part.strip()]
+        if len(parts) >= 2:
+            return parts[1]
+    return ""
+
+
 def _build_tools_list(tu) -> List[Dict]:
     tools = []
     items = tu.all_tools
@@ -163,7 +309,8 @@ def _build_tools_list(tu) -> List[Dict]:
             continue
 
         desc = tool.get("description", "")
-        category = tool.get("category", "") or tool.get("type", "")
+        tool_type = tool.get("type", "") or ""
+        category = tool.get("category", "") or tool_type
         params = tool.get("parameter", tool.get("parameters", {}))
         param_count = 0
         required_params: List[str] = []
@@ -176,11 +323,28 @@ def _build_tools_list(tu) -> List[Dict]:
 
         examples = tool.get("test_examples", [])
         has_return = bool(tool.get("return_schema"))
+        taxonomy = classify_science_tool(
+            name=name,
+            raw_category=category,
+            description=desc,
+            tool_type=tool_type,
+        )
 
         tools.append({
             "name": name,
             "description": _sanitize(desc),
             "category": category,
+            "tool_type": tool_type,
+            "family": _derive_tool_family(name),
+            "action": _derive_tool_action(name),
+            "function_group": taxonomy["function_group"],
+            "function_group_zh": taxonomy["function_group_zh"],
+            "discipline": taxonomy["discipline"],
+            "discipline_zh": taxonomy["discipline_zh"],
+            "system_group": taxonomy["system_group"],
+            "system_group_zh": taxonomy["system_group_zh"],
+            "system_subgroup": taxonomy["system_subgroup"],
+            "system_subgroup_zh": taxonomy["system_subgroup_zh"],
             "param_count": param_count,
             "required_params": required_params,
             "has_examples": len(examples) > 0,
@@ -203,14 +367,15 @@ async def list_tools(
     _user: User = Depends(require_user),
 ):
     """列出所有 ToolUniverse 工具。"""
-    cache_key = "tu_tools_list"
+    cache_key = "tu_tools_list_v3"
     cached = _get_cached(cache_key)
 
     if cached is None:
         tu = _get_tu()
-        if tu is None:
+        cached = _build_tools_list(tu) if tu is not None else []
+        cached.extend(_list_science_overlay_tools(force_reload=True))
+        if not cached:
             raise HTTPException(status_code=503, detail="ToolUniverse is loading, please retry in a moment")
-        cached = _build_tools_list(tu)
         _set_cached(cache_key, cached)
 
     trans = _get_translation(lang)
@@ -223,13 +388,35 @@ async def list_tools(
         if trans:
             tools = [t for t in tools if q in t["name"].lower()
                      or q in t.get("description", "").lower()
+                     or q in t.get("family", "").lower()
+                     or q in t.get("action", "").lower()
+                     or q in t.get("tool_type", "").lower()
+                     or q in t.get("function_group", "").lower()
+                     or q in t.get("discipline", "").lower()
+                     or q in t.get("system_group", "").lower()
+                     or q in t.get("system_subgroup", "").lower()
+                     or q in t.get("function_group_zh", "").lower()
+                     or q in t.get("discipline_zh", "").lower()
+                     or q in t.get("system_group_zh", "").lower()
+                     or q in t.get("system_subgroup_zh", "").lower()
                      or q in next((c["description"] for c in cached if c["name"] == t["name"]), "").lower()]
         else:
-            tools = [t for t in tools if q in t["name"].lower() or q in t.get("description", "").lower()]
+            tools = [t for t in tools if q in t["name"].lower()
+                     or q in t.get("description", "").lower()
+                     or q in t.get("family", "").lower()
+                     or q in t.get("action", "").lower()
+                     or q in t.get("tool_type", "").lower()
+                     or q in t.get("function_group", "").lower()
+                     or q in t.get("discipline", "").lower()
+                     or q in t.get("system_group", "").lower()
+                     or q in t.get("system_subgroup", "").lower()
+                     or q in t.get("function_group_zh", "").lower()
+                     or q in t.get("discipline_zh", "").lower()
+                     or q in t.get("system_group_zh", "").lower()
+                     or q in t.get("system_subgroup_zh", "").lower()]
     if category:
         tools = [t for t in tools if t.get("category", "").lower() == category.lower()]
 
-    all_tools = [_translate_tool_list_item(t, trans) for t in cached] if trans else cached
     categories = sorted(set(t.get("category", "") for t in cached if t.get("category")))
     return {"tools": tools, "total": len(cached), "categories": categories}
 
@@ -241,6 +428,15 @@ async def get_tool_spec(
     _user: User = Depends(require_user),
 ):
     """获取单个工具的详细规格。"""
+    overlay_spec = _science_overlay_spec_map(force_reload=False).get(tool_name)
+    if overlay_spec is not None:
+        cleaned = dict(overlay_spec)
+        cleaned.pop("_proxy", None)
+        trans = _get_translation(lang)
+        if trans:
+            return _translate_tool_spec(cleaned, trans)
+        return cleaned
+
     cache_key = f"tu_spec_v2_{tool_name}"
     cached = _get_cached(cache_key)
     if not cached:
@@ -267,12 +463,42 @@ async def get_tool_spec(
             "test_examples": [],
             "return_schema": None,
             "category": "",
+            "tool_type": "",
+            "family": "",
+            "action": "",
+            "function_group": "",
+            "function_group_zh": "",
+            "discipline": "",
+            "discipline_zh": "",
+            "system_group": "",
+            "system_group_zh": "",
+            "system_subgroup": "",
+            "system_subgroup_zh": "",
             "source_file": "",
         }
         if raw_tool:
+            raw_tool_type = raw_tool.get("type", "") or ""
+            raw_category = raw_tool.get("category", "") or raw_tool_type
+            taxonomy = classify_science_tool(
+                name=tool_name,
+                raw_category=raw_category,
+                description=cached.get("description", ""),
+                tool_type=raw_tool_type,
+            )
             cached["test_examples"] = raw_tool.get("test_examples", [])
             cached["return_schema"] = raw_tool.get("return_schema")
-            cached["category"] = raw_tool.get("category", "") or raw_tool.get("type", "")
+            cached["tool_type"] = raw_tool_type
+            cached["category"] = raw_category
+            cached["family"] = _derive_tool_family(tool_name)
+            cached["action"] = _derive_tool_action(tool_name)
+            cached["function_group"] = taxonomy["function_group"]
+            cached["function_group_zh"] = taxonomy["function_group_zh"]
+            cached["discipline"] = taxonomy["discipline"]
+            cached["discipline_zh"] = taxonomy["discipline_zh"]
+            cached["system_group"] = taxonomy["system_group"]
+            cached["system_group_zh"] = taxonomy["system_group_zh"]
+            cached["system_subgroup"] = taxonomy["system_subgroup"]
+            cached["system_subgroup_zh"] = taxonomy["system_subgroup_zh"]
             cached["source_file"] = raw_tool.get("source_file", "")
             cached["description"] = _sanitize(cached.get("description", ""))
 
@@ -290,11 +516,24 @@ async def run_tool(
     body: ToolRunRequest,
     _user: User = Depends(require_user),
 ):
-    tu = _get_tu()
-    if tu is None:
-        raise HTTPException(status_code=503, detail="ToolUniverse is loading")
-
     try:
+        overlay_spec = _science_overlay_spec_map(force_reload=True).get(tool_name)
+        if overlay_spec is not None:
+            proxy = overlay_spec["_proxy"]
+            arguments = _validate_external_arguments(proxy, body.arguments)
+            runner = getattr(proxy, "coroutine", None) or getattr(proxy, "func", None)
+            if runner is None:
+                raise RuntimeError(f"Tool '{tool_name}' is missing an executable runner")
+
+            result = runner(**arguments)
+            if inspect.isawaitable(result):
+                result = await result
+            return _normalize_external_result(result)
+
+        tu = _get_tu()
+        if tu is None:
+            raise HTTPException(status_code=503, detail="ToolUniverse is loading")
+
         result = tu.run({"name": tool_name, "arguments": body.arguments})
         if inspect.isawaitable(result):
             result = await result
@@ -310,13 +549,14 @@ async def list_categories(
     lang: str = Query(default="en", description="语言: en / zh"),
     _user: User = Depends(require_user),
 ):
-    cache_key = "tu_tools_list"
+    cache_key = "tu_tools_list_v3"
     cached = _get_cached(cache_key)
     if cached is None:
         tu = _get_tu()
-        if tu is None:
+        cached = _build_tools_list(tu) if tu is not None else []
+        cached.extend(_list_science_overlay_tools(force_reload=True))
+        if not cached:
             raise HTTPException(status_code=503, detail="ToolUniverse is loading")
-        cached = _build_tools_list(tu)
         _set_cached(cache_key, cached)
 
     trans = _get_translation(lang)
@@ -324,12 +564,12 @@ async def list_categories(
 
     counts: Dict[str, int] = {}
     for t in cached:
-        cat = t.get("category", "other") or "other"
+        cat = t.get("discipline", "general_compute") or "general_compute"
         counts[cat] = counts.get(cat, 0) + 1
 
     return {
         "categories": [
-            {"name": k, "name_zh": cats_tr.get(k, ""), "count": v}
+            {"name": k, "name_zh": DISCIPLINE_LABELS.get(k, cats_tr.get(k, "")), "count": v}
             for k, v in sorted(counts.items())
         ]
     }

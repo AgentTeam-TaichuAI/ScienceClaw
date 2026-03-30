@@ -44,7 +44,7 @@ let timeoutId: ReturnType<typeof setTimeout>;
 
 const greetings = ['Hello! 👋', 'Hi there!', 'I am ScienceClaw', 'Ready to research! 🧬'];
 
-const handleClick = (e: MouseEvent) => {
+const handleClick = () => {
   if (!props.interactive) return;
 
   // Prevent event bubbling if necessary, though usually fine

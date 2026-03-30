@@ -19,6 +19,12 @@ from langchain_core.tools import tool
 
 logger = logging.getLogger(__name__)
 
+__tool_meta__ = {
+    "category": "Models & Prediction",
+    "subcategory": "Materials Science",
+    "tags": ["materials", "dft", "phase-diagram"],
+}
+
 
 @tool
 def my_tool_name(param1: str, param2: int) -> str:
@@ -53,6 +59,27 @@ def my_tool_name(param1: str, param2: int) -> str:
 6. **Tools run in the sandbox**: All `@tool` functions execute in the sandbox container — the same environment where test scripts run. This means the testing environment IS the production environment. You can import any package available in the sandbox.
 7. **Pure functions preferred**: Tools should ideally be stateless. If state is needed, use file I/O or external services.
 8. **Return serializable types**: Return `str`, `int`, `float`, `bool`, `dict`, or `list` — types that can be serialized in the agent's conversation.
+
+9. **Include `__tool_meta__` by default**: Every new tool should define module-level metadata with `category`, `subcategory`, and `tags` so the External Tools library can classify it automatically.
+
+### Tool Metadata
+
+Add a module-level `__tool_meta__` constant near the top of every new tool file:
+
+```python
+__tool_meta__ = {
+    "category": "Models & Prediction",
+    "subcategory": "Materials Science",
+    "tags": ["materials", "dft", "phase-diagram"],
+}
+```
+
+- `category`: required display category for sidebar grouping; keep this functional, such as `Data & Resources`, `Database & API`, `Models & Prediction`, `Analysis & Workflow`, `Knowledge & Literature`, or `Workspace & Authoring`
+- `subcategory`: optional second-level grouping shown as chips; use this for domain placement such as `Materials Science`
+- `tags`: optional list of short labels used for fine-grained filtering
+- Use short, human-readable strings; avoid IDs or long sentences
+- Keep metadata as plain Python literals only, so backend AST parsing can read it safely without importing the tool
+- Do not use `Materials Science` as the top-level `category`; use it as `subcategory` instead
 
 ### Available Packages (Sandbox Environment)
 
@@ -106,6 +133,7 @@ If the user already has a script or describes the logic clearly, extract the ans
 Based on the requirements, write a complete tool file following the format above. Key considerations:
 
 - Choose a clear, descriptive function name using `snake_case`
+- Add `__tool_meta__` before the tool function so it is classified correctly in the UI
 - Write a comprehensive docstring
 - Add proper error handling (try/except, input validation)
 - Log inputs and outputs

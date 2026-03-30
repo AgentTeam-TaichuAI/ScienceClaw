@@ -2,51 +2,59 @@ services:
   sandbox:
     image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-sandbox:release-v0.0.4
     security_opt:
-    - seccomp:unconfined
+      - seccomp:unconfined
     extra_hosts:
-    - host.docker.internal:host-gateway
-    shm_size: 2gb
+      - "host.docker.internal:host-gateway"
+    shm_size: "2gb"
     mem_limit: ${SANDBOX_MEM_LIMIT:-8g}
     cpus: ${SANDBOX_CPUS:-4}
     environment:
       TZ: Asia/Shanghai
       WEBSEARCH_URL: http://websearch:8068
+      OBSIDIAN_VAULT_DIR: /home/scienceclaw/obsidian_vault
+      OBSIDIAN_HOST_BRIDGE_URL: ${OBSIDIAN_HOST_BRIDGE_URL:-http://host.docker.internal:8765}
+      OBSIDIAN_HOST_BRIDGE_TOKEN: ${OBSIDIAN_HOST_BRIDGE_TOKEN:-scienceclaw-local-bridge}
     volumes:
-    - ./Skills:/skills:ro
-    - ./Tools:/app/Tools:ro
-    - ./ScienceClaw/backend/builtin_skills:/builtin-skills:ro
-    - ./workspace:/home/scienceclaw:rwx
+      - ./Skills:/skills:ro
+      - ./Tools:/app/Tools:ro
+      - ./ScienceClaw/backend:/app/backend:ro
+      - ./ScienceClaw/backend/builtin_skills:/builtin-skills:ro
+      - ./workspace:/home/scienceclaw:rwx
+      - type: bind
+        source: ${OBSIDIAN_VAULT_HOST_PATH:-./workspace/obsidian_vault}
+        target: /home/scienceclaw/obsidian_vault
     ports:
-    - 18080:8080
+      - "18080:8080"
     restart: unless-stopped
     healthcheck:
-      test:
-      - CMD-SHELL
-      - curl -fsS http://127.0.0.1:8080/v1/docs >/dev/null || exit 1
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/v1/docs >/dev/null || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 30
+
   mongo:
     image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-mongo:release-v0.0.4
     environment:
       MONGO_INITDB_ROOT_USERNAME: scienceone
       MONGO_INITDB_ROOT_PASSWORD: Yp51Bi1eEjC77sAt
     ports:
-    - 27014:27017
+      - "27014:27017"
     volumes:
-    - scienceclaw_mongo_data:/data/db
+      - scienceclaw_mongo_data:/data/db
     restart: unless-stopped
+
   searxng:
     image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-searxng:release-v0.0.4
     environment:
       SEARXNG_BASE_URL: http://localhost:8080/
-      SEARXNG_LIMITER: 'false'
+      SEARXNG_LIMITER: "false"
       TZ: Asia/Shanghai
     volumes:
-    - ./ScienceClaw/websearch/config/settings.yml:/etc/searxng/settings.yml
+      - ./ScienceClaw/websearch/config/settings.yml:/etc/searxng/settings.yml
     ports:
-    - 26080:8080
+      - "26080:8080"
     restart: unless-stopped
+
   websearch:
     image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-websearch:release-v0.0.4
     environment:
@@ -57,19 +65,23 @@ services:
       TZ: Asia/Shanghai
       API_KEY: fdsfkjikmii
     ports:
-    - 8068:8068
+      - "8068:8068"
     restart: unless-stopped
     depends_on:
       searxng:
         condition: service_started
+
   backend:
     image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-backend:release-v0.0.4
     extra_hosts:
-    - host.docker.internal:host-gateway
+      - "host.docker.internal:host-gateway"
     volumes:
-    - ./Tools:/app/Tools
-    - ./Skills:/app/Skills
-    - ./workspace:/home/scienceclaw
+      - ./Tools:/app/Tools
+      - ./Skills:/app/Skills
+      - ./workspace:/home/scienceclaw
+      - type: bind
+        source: ${OBSIDIAN_VAULT_HOST_PATH:-./workspace/obsidian_vault}
+        target: /home/scienceclaw/obsidian_vault
     environment:
       SANDBOX_REST_URL: http://sandbox:8080
       WORKSPACE_DIR: /home/scienceclaw
@@ -82,12 +94,12 @@ services:
       FILE_DOWNLOAD_ALLOWED_PREFIXES: /tmp,/app,/home/scienceclaw
       TZ: Asia/Shanghai
       AUTH_PROVIDER: local
-      BOOTSTRAP_ADMIN_ENABLED: 'true'
+      BOOTSTRAP_ADMIN_ENABLED: "true"
       BOOTSTRAP_ADMIN_USERNAME: admin
       BOOTSTRAP_ADMIN_PASSWORD: admin123
       BOOTSTRAP_ADMIN_FULLNAME: Administrator
       BOOTSTRAP_ADMIN_EMAIL: admin@localhost
-      BOOTSTRAP_UPDATE_ADMIN_PASSWORD: 'true'
+      BOOTSTRAP_UPDATE_ADMIN_PASSWORD: "true"
       MONGODB_HOST: mongo
       MONGODB_PORT: 27017
       MONGODB_USER: scienceone
@@ -95,11 +107,14 @@ services:
       WEBSEARCH_API_KEY: fdsfkjikmii
       WEBSEARCH_BASE_URL: http://websearch:8068
       WEBSEARCH_URL: http://websearch:8068
+      OBSIDIAN_VAULT_DIR: /home/scienceclaw/obsidian_vault
+      OBSIDIAN_HOST_BRIDGE_URL: ${OBSIDIAN_HOST_BRIDGE_URL:-http://host.docker.internal:8765}
+      OBSIDIAN_HOST_BRIDGE_TOKEN: ${OBSIDIAN_HOST_BRIDGE_TOKEN:-scienceclaw-local-bridge}
       TASK_SERVICE_API_KEY: ${TASK_SERVICE_API_KEY:-}
-      IM_ENABLED: 'true'
+      IM_ENABLED: "true"
       IM_RESPONSE_TIMEOUT: 300
       IM_MAX_MESSAGE_LENGTH: 4000
-      LARK_ENABLED: 'true'
+      LARK_ENABLED: "true"
       LARK_APP_ID: ${LARK_APP_ID-}
       LARK_APP_SECRET: ${LARK_APP_SECRET-}
       TELEGRAM_ENABLED: ${TELEGRAM_ENABLED-false}
@@ -109,11 +124,12 @@ services:
       TELEGRAM_PUBLIC_BASE_URL: ${TELEGRAM_PUBLIC_BASE_URL-}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL-}
     ports:
-    - 12001:8000
-    command: 'python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+      - "12001:8000"
+    command: >
+      python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
       --reload-dir /app/backend
-
-      '
+      --reload-dir /app/Tools
+      --reload-dir /app/Skills
     restart: unless-stopped
     depends_on:
       sandbox:
@@ -123,19 +139,19 @@ services:
       websearch:
         condition: service_started
     healthcheck:
-      test:
-      - CMD-SHELL
-      - curl -fsS http://127.0.0.1:8000/api/v1/auth/status >/dev/null || exit 1
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/api/v1/auth/status >/dev/null || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 30
+
   redis:
     image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-redis:release-v0.0.4
     restart: unless-stopped
+
   scheduler_api:
     image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-task-service:release-v0.0.4
     extra_hosts:
-    - host.docker.internal:host-gateway
+      - "host.docker.internal:host-gateway"
     environment:
       TZ: Asia/Shanghai
       DISPLAY_TIMEZONE: ${DISPLAY_TIMEZONE:-Asia/Shanghai}
@@ -151,7 +167,7 @@ services:
       DS_URL: ${API_BASE:-https://api.deepseek.com/v1}
       DS_MODEL: ${MODEL_NAME:-deepseek-chat}
     ports:
-    - 12002:8001
+      - "12002:8001"
     command: uvicorn app.main:app --host 0.0.0.0 --port 8001
     restart: unless-stopped
     depends_on:
@@ -161,10 +177,11 @@ services:
         condition: service_started
       backend:
         condition: service_started
+
   celery_worker:
     image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-task-service:release-v0.0.4
     extra_hosts:
-    - host.docker.internal:host-gateway
+      - "host.docker.internal:host-gateway"
     environment:
       TZ: Asia/Shanghai
       MONGODB_HOST: mongo
@@ -184,10 +201,11 @@ services:
         condition: service_started
       backend:
         condition: service_started
+
   celery_beat:
     image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-task-service:release-v0.0.4
     extra_hosts:
-    - host.docker.internal:host-gateway
+      - "host.docker.internal:host-gateway"
     environment:
       TZ: Asia/Shanghai
       MONGODB_HOST: mongo
@@ -203,6 +221,7 @@ services:
         condition: service_started
       redis:
         condition: service_started
+
   frontend:
     image: swr.cn-north-4.myhuaweicloud.com/claw/scienceclaw-frontend:release-v0.0.4
     environment:
@@ -211,11 +230,11 @@ services:
       VITE_DISPLAY_TIMEZONE: ${DISPLAY_TIMEZONE:-Asia/Shanghai}
       NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
       NPM_CONFIG_CACHE: /npm-cache
-      CHOKIDAR_USEPOLLING: 'true'
-      CHOKIDAR_INTERVAL: '300'
+      CHOKIDAR_USEPOLLING: "true"
+      CHOKIDAR_INTERVAL: "300"
       TZ: Asia/Shanghai
     ports:
-    - 5173:80
+      - "5173:80"
     restart: unless-stopped
     depends_on:
       backend:
@@ -245,9 +264,10 @@ services:
         condition: service_started
       frontend:
         condition: service_started
+
 volumes:
-  scienceclaw_mongo_data: null
-  scienceclaw_frontend_node_modules: null
-  scienceclaw_frontend_npm_cache: null
-  scienceclaw_caddy_data: null
-  scienceclaw_caddy_config: null
+  scienceclaw_mongo_data:
+  scienceclaw_frontend_node_modules:
+  scienceclaw_frontend_npm_cache:
+  scienceclaw_caddy_data:
+  scienceclaw_caddy_config:

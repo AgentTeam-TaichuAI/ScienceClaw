@@ -22,6 +22,11 @@ export function formatMarkdownSync(text: string): string {
   return formatMarkdown(text);
 }
 
+const TABLE_ROW_PATTERN = new RegExp(`^\\|.*\\|$`);
+const TABLE_DIVIDER_PATTERN = new RegExp(
+  `^\\|[${['-', ':', '\\s', '\\|'].join('')}]+\\|$`,
+);
+
 /**
  * 预处理：清理 LLM 输出中的常见问题
  */
@@ -85,8 +90,9 @@ function normalizeTables(text: string): string {
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const isTableRow = /^\|.*\|$/.test(line.trim());
-    const isTableDivider = /^\|[-:\s|]+\|$/.test(line.trim());
+    const trimmedLine = line.trim();
+    const isTableRow = TABLE_ROW_PATTERN.test(trimmedLine);
+    const isTableDivider = TABLE_DIVIDER_PATTERN.test(trimmedLine);
 
     if (isTableRow || isTableDivider) {
       if (!inTable) {

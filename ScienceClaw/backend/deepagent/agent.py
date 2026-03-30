@@ -31,6 +31,7 @@ from loguru import logger
 from deepagents import create_deep_agent
 from deepagents.backends import CompositeBackend, FilesystemBackend
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, DEFAULT_SUBAGENT_PROMPT
+from langchain_core.tools import StructuredTool
 from backend.deepagent.engine import get_llm_model
 from backend.deepagent.tools import web_search, web_crawl, propose_skill_save, propose_tool_save, eval_skill, grade_eval
 from backend.deepagent.tooluniverse_tools import (
@@ -73,6 +74,12 @@ _EXTERNAL_SKILLS_DIR = os.environ.get("EXTERNAL_SKILLS_DIR", "/app/Skills")
 _BUILTIN_SKILLS_ROUTE = "/builtin-skills/"
 _EXTERNAL_SKILLS_ROUTE = "/skills/"
 _WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", "/home/scienceclaw")
+_OBSIDIAN_VAULT_TOOL_NAMES = {
+    "obsidian_write_materials_note",
+    "obsidian_import_zotero_bbt_json",
+    "obsidian_run_zotero_review_agent",
+    "obsidian_rewrite_materials_review_note",
+}
 
 # ───────────────────────────────────────────────────────────────────
 # Backend 构建
@@ -125,11 +132,13 @@ Always respond in {language_instruction}.
 ## Core Principles
 - Adapt to the conversation. Chat naturally for casual topics, but take concrete actions when the user asks for tasks or problem-solving.
 - Prefer execution over explanation. If a task can be solved through code or tools, implement and execute the solution instead of only describing it.
+- **File deliverables must be real files**: if the user asks for a PDF, DOCX, spreadsheet, Markdown file, or other concrete file output, you must actually create that file in the workspace. Copying a template, drafting sections, or describing the result is not sufficient.
 - **Real-time information**: For any question involving current or up-to-date information, you MUST use `web_search` — NEVER answer from training data alone.
 - **Write files, not chat**: When the user asks to write, create, or generate code/scripts/files, ALWAYS use `write_file` to create real files — never just paste code in chat.
 - **Write → Execute → Fix loop**: After writing ANY executable script, you MUST immediately run it via `execute` to verify correctness. If it fails, fix and re-run.
 - **Skill-first approach**: ALWAYS check available skills (`/builtin-skills/` and `/skills/`) before starting any task. If a skill matches, `read_file` its SKILL.md and follow the workflow. Do NOT reinvent what a skill already provides.
 - **Research tasks**: When the user's request involves research, reports, reviews, surveys, literature analysis, discoveries, or any deep investigation topic, ALWAYS check and consider `/skills/deep-research/SKILL.md` first.
+- **Attachment-first execution**: When the user uploads a file and asks you to use it, treat that uploaded file as the primary source of truth and prefer existing tools that operate on it directly over writing ad hoc parsers.
 - **SKILL.md files are instruction documents** — use `read_file` to read them, NEVER `execute` them as scripts.
 - Solve problems proactively. Only ask questions when the intent or requirements are truly unclear.
 
@@ -137,6 +146,31 @@ Always respond in {language_instruction}.
 Your workspace directory is {workspace_dir}/.
 - All files should be created under this directory using absolute paths.
 - The workspace is shared between the file system and the execution sandbox.
+
+## Obsidian Preference
+{obsidian_vault_instruction}
+- Whenever an Obsidian materials tool returns `effective_vault_dir`, include that actual path in your user-facing summary.
+- If the tool returns `vault_match_status=normalized_same_path`, treat the configured path as successfully matched and do not describe it as a fallback.
+- If the tool returns `fell_back_to_default_vault=true` or `vault_match_status=fallback_other_path`, explicitly say the configured path was not used and the write to the requested vault failed.
+
+## Attachment Workflows
+- Uploaded attachments arrive as absolute workspace paths in the user's query. Read or pass those paths directly.
+- If an uploaded `.json` file appears to be a Zotero / Better BibTeX export and the user wants an end-to-end Chinese review, full-text synthesis, or Obsidian review note, prefer `obsidian_run_zotero_review_agent`.
+- If the user asks to continue editing an existing review note, rewrite it into a more academic style, change citation style, or further polish a previously generated Zotero/Obsidian review, prefer `obsidian_rewrite_materials_review_note`.
+- If the user only wants literature-note import or only wants a scaffold review note, prefer `obsidian_import_zotero_bbt_json` instead of writing a custom importer.
+- For that workflow, infer `topic` from the user's message first, otherwise from the filename stem, and pass `vault_dir` when available.
+- After import, tell the user what was created and where it was written, using the tool's `effective_vault_dir` field rather than guessing.
+- For Zotero/Obsidian review generation or rewrite workflows, you MUST read these five local skills in order before the final write step:
+  1. `/skills/zotero-materials-review/SKILL.md`
+  2. `/skills/literature-review/SKILL.md`
+  3. `/skills/scientific-writing/SKILL.md`
+  4. `/skills/obsidian-markdown/SKILL.md`
+  5. `/skills/materials-obsidian/SKILL.md`
+- Do not skip those local skills just because you think you already know the workflow. If a required local skill is missing or unread, read it before the final write step.
+- For the Zotero Review Agent workflow, use this exact task structure in `write_todos`: `校验输入`、`构建证据包`、`导入文献笔记`、`生成中文综述`、`写作润色`、`写入 Obsidian`.
+- After `obsidian_run_zotero_review_agent` returns, read its `review_input_path` and `review_draft_path` when available, refine the draft into polished Chinese prose, then overwrite the same review note via `obsidian_write_materials_note` rather than creating a second manuscript note.
+- When `obsidian_rewrite_materials_review_note` is appropriate, use the session's most recent successful review-note context when the user does not explicitly provide a path, and overwrite the same review note by default unless the user explicitly asks for a separate copy.
+- If you already asked for overwrite confirmation and the user replies with a short affirmative such as `继续`、`开始`、`确认`、`好`、`同意` or `yes`, treat that as approval to overwrite the existing note. Do not ask for the same confirmation twice.
 
 ## Sandbox Boundary
 The sandbox is an isolated execution environment. Scripts running in the sandbox CANNOT import or call your tools directly (`from functions import ...` will FAIL with `ModuleNotFoundError`).
@@ -162,6 +196,7 @@ The sandbox is an isolated execution environment. Scripts running in the sandbox
 
 ### Step 3: Verify & Deliver
 - Re-read the user's original request. Check all deliverables are produced.
+- If the user requested a file deliverable (for example PDF, DOCX, XLSX, or Markdown), verify that the final file exists at the expected path before finishing.
 - If a script fails, fix the specific error — do NOT rewrite from scratch. If it fails 2+ times, simplify.
 
 ### Step 4: Reflect & Capture
@@ -196,7 +231,12 @@ _LANGUAGE_MAP = {
 }
 
 
-def get_system_prompt(workspace_dir: str, sandbox_env: str | None = None, language: str | None = None) -> str:
+def get_system_prompt(
+    workspace_dir: str,
+    sandbox_env: str | None = None,
+    language: str | None = None,
+    obsidian_vault_dir: str | None = None,
+) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S %A")
     lang_code = (language or "").strip().lower()
     if lang_code in _LANGUAGE_MAP:
@@ -209,10 +249,24 @@ def get_system_prompt(workspace_dir: str, sandbox_env: str | None = None, langua
     else:
         language_instruction = "- Always respond in the same language the user uses."
 
+    preferred_vault = (obsidian_vault_dir or "").strip()
+    if preferred_vault:
+        obsidian_vault_instruction = (
+            f"- The user configured a preferred Obsidian vault path: `{preferred_vault}`.\n"
+            f"- When calling `obsidian_write_materials_note` or `obsidian_import_zotero_bbt_json`, pass this value as `vault_dir` when possible.\n"
+            f"- Treat that configured vault path as strict: if the runtime cannot write to that path through the host bridge, the task should fail instead of silently falling back to `/home/scienceclaw/obsidian_vault`."
+        )
+    else:
+        obsidian_vault_instruction = (
+            "- No user-specific Obsidian vault path is configured.\n"
+            "- Use the mounted/default vault path when calling Obsidian materials tools."
+        )
+
     prompt = _SYSTEM_PROMPT_TEMPLATE.format(
         current_datetime=now,
         workspace_dir=workspace_dir,
         language_instruction=language_instruction,
+        obsidian_vault_instruction=obsidian_vault_instruction,
     )
     if sandbox_env:
         prompt += f"\n\n## Sandbox Environment Information\n{sandbox_env}"
@@ -241,7 +295,41 @@ _STATIC_TOOLS = [
 ]
 
 
-def _collect_tools(blocked_tools: Set[str] | None = None) -> List:
+def _inject_default_vault_dir(tool_obj: Any, preferred_vault: str) -> Any:
+    preferred = (preferred_vault or "").strip()
+    if not preferred:
+        return tool_obj
+    if getattr(tool_obj, "name", "") not in _OBSIDIAN_VAULT_TOOL_NAMES:
+        return tool_obj
+    if not isinstance(tool_obj, StructuredTool):
+        return tool_obj
+
+    base_func = getattr(tool_obj, "func", None)
+    if base_func is None:
+        return tool_obj
+
+    def _wrapped_func(*args: Any, **kwargs: Any) -> Any:
+        actual_kwargs = dict(kwargs)
+        if not str(actual_kwargs.get("vault_dir", "") or "").strip():
+            actual_kwargs["vault_dir"] = preferred
+        return base_func(*args, **actual_kwargs)
+
+    updates: Dict[str, Any] = {"func": _wrapped_func}
+    base_coroutine = getattr(tool_obj, "coroutine", None)
+    if base_coroutine is not None:
+        async def _wrapped_coroutine(*args: Any, **kwargs: Any) -> Any:
+            actual_kwargs = dict(kwargs)
+            if not str(actual_kwargs.get("vault_dir", "") or "").strip():
+                actual_kwargs["vault_dir"] = preferred
+            return await base_coroutine(*args, **actual_kwargs)
+
+        updates["coroutine"] = _wrapped_coroutine
+
+    logger.info(f"[Agent] Injecting preferred Obsidian vault into tool {tool_obj.name}: {preferred}")
+    return tool_obj.model_copy(update=updates)
+
+
+def _collect_tools(blocked_tools: Set[str] | None = None, preferred_vault: str = "") -> List:
     """合并内置工具与外部扩展工具，去重并过滤屏蔽项。
 
     通过 DirWatcher 检测 Tools/ 目录变更，仅在变更时才重新 import 模块。
@@ -261,6 +349,7 @@ def _collect_tools(blocked_tools: Set[str] | None = None) -> List:
         if t.name in blocked:
             logger.info(f"[Agent] 工具已屏蔽，跳过: {t.name}")
             continue
+        t = _inject_default_vault_dir(t, preferred_vault)
         if t.name not in seen_names:
             all_tools.append(t)
             seen_names.add(t.name)
@@ -344,7 +433,7 @@ async def deep_agent(
     # ── 检测 Tools/Skills 目录变更并按需重新加载 ──
     _dir_watcher.has_changed(_EXTERNAL_SKILLS_DIR)
 
-    tools = _collect_tools(blocked_tools=blocked_tools)
+    tools = _collect_tools(blocked_tools=blocked_tools, preferred_vault=ts.obsidian_vault_dir)
 
     sse_middleware = SSEMonitoringMiddleware(
         agent_name="DeepAgent",
@@ -392,7 +481,12 @@ async def deep_agent(
     }
 
     # 4. 注入系统提示词
-    system_prompt = get_system_prompt(actual_workspace, sandbox_info, language=language)
+    system_prompt = get_system_prompt(
+        actual_workspace,
+        sandbox_info,
+        language=language,
+        obsidian_vault_dir=ts.obsidian_vault_dir,
+    )
     agent_kwargs["system_prompt"] = system_prompt
 
     if diag:

@@ -27,7 +27,7 @@
 
       <!-- 步骤列表 -->
       <div class="max-h-[min(calc(100vh-360px),320px)] overflow-y-auto px-3 pb-3">
-        <div v-for="(step, idx) in plan.steps" :key="step.id"
+        <div v-for="step in plan.steps" :key="step.id"
           class="flex items-start gap-2 py-1.5 px-1.5 rounded-md transition-colors"
           :class="{ 'bg-blue-50/40 dark:bg-blue-950/15': ['running', 'in_progress'].includes(step.status) }">
           <!-- 状态图标 -->

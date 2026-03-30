@@ -15,6 +15,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
       build-essential \
       curl \
+      git \
       libxrender1 \
       libxext6 \
       libx11-6

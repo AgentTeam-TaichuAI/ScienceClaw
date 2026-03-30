@@ -1,4 +1,4 @@
-import { createApp } from 'vue'
+import { createApp, defineAsyncComponent } from 'vue'
 import { createRouter, createWebHistory } from 'vue-router'
 import App from './App.vue'
 import './assets/global.css'
@@ -9,20 +9,20 @@ import './utils/toast'
 import i18n from './composables/useI18n'
 import { getStoredToken, getCachedAuthProvider } from './api/auth'
 
-// Import page components
-import HomePage from './pages/HomePage.vue'
-import ChatPage from './pages/ChatPage.vue'
-import SkillsPage from './pages/SkillsPage.vue'
-import SkillDetailPage from '@/pages/SkillDetailPage.vue'
-import ToolsPage from './pages/ToolsPage.vue'
-import ToolDetailPage from './pages/ToolDetailPage.vue'
-import ScienceToolDetail from './pages/ScienceToolDetail.vue'
-import TasksPage from './pages/TasksPage.vue'
-import LoginPage from './pages/LoginPage.vue'
-import MainLayout from './pages/MainLayout.vue'
 import { configure } from "vue-gtag";
-import SharePage from './pages/SharePage.vue';
-import ShareLayout from './pages/ShareLayout.vue';
+
+const HomePage = () => import('./pages/HomePage.vue')
+const ChatPage = () => import('./pages/ChatPage.vue')
+const SkillsPage = () => import('./pages/SkillsPage.vue')
+const SkillDetailPage = () => import('@/pages/SkillDetailPage.vue')
+const ToolsPage = () => import('./pages/ToolsPage.vue')
+const ToolDetailPage = () => import('./pages/ToolDetailPage.vue')
+const ScienceToolDetail = () => import('./pages/ScienceToolDetail.vue')
+const TasksPage = () => import('./pages/TasksPage.vue')
+const LoginPage = () => import('./pages/LoginPage.vue')
+const MainLayout = () => import('./pages/MainLayout.vue')
+const SharePage = () => import('./pages/SharePage.vue')
+const ShareLayout = () => import('./pages/ShareLayout.vue')
 
 configure({
   tagId: 'G-XCRZ3HH31S' // Replace with your own Google Analytics tag ID
@@ -126,11 +126,9 @@ router.beforeEach(async (to, _, next) => {
   }
 })
 
-import MoleculeViewer from './components/MoleculeViewer.vue'
-
 const app = createApp(App)
 
-app.component('molecule-viewer', MoleculeViewer) // Register globally
+app.component('molecule-viewer', defineAsyncComponent(() => import('./components/MoleculeViewer.vue')))
 
 app.use(router)
 app.use(i18n)

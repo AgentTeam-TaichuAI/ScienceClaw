@@ -13,7 +13,7 @@
         </div>
         <div class="min-w-0">
           <h1 class="text-base font-bold text-white truncate">{{ toolName }}</h1>
-          <p class="text-white/50 text-xs">ToolUniverse Scientific Tool</p>
+          <p class="text-white/50 text-xs">Scientific Tool Library</p>
         </div>
       </div>
     </div>

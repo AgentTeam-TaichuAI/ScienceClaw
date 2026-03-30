@@ -42,6 +42,49 @@ from backend.task_settings import get_task_settings, TaskSettings
 
 _THINK_TAG_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 _THINK_CONTENT_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL)
+_ZOTERO_OBSIDIAN_REQUIRED_SKILLS = [
+    "zotero-materials-review",
+    "literature-review",
+    "scientific-writing",
+    "obsidian-markdown",
+    "materials-obsidian",
+]
+_REVIEW_REWRITE_RE = re.compile(
+    r"(改写|改成|继续修改|继续改写|继续润色|润色|学术|科研|论文|GB/T\s*7714|GB7714|cit(e|ation))",
+    re.IGNORECASE,
+)
+_ZOTERO_REVIEW_RE = re.compile(
+    r"(zotero|better bibtex|bbt|obsidian|review agent|综述|文献综述|literature review|pdf)",
+    re.IGNORECASE,
+)
+
+
+def _infer_required_skills(
+    query: str,
+    attachments: List[str] | None,
+    session: ScienceSession | None,
+) -> List[str]:
+    lowered_query = (query or "").strip()
+    attachment_names = [str(path or "").lower() for path in attachments or []]
+    has_json_attachment = any(name.endswith(".json") for name in attachment_names)
+    has_recent_review = bool(getattr(session, "latest_review_context", {}) or {}) if session else False
+    rewrite_intent = has_recent_review and bool(_REVIEW_REWRITE_RE.search(lowered_query))
+    zotero_review_intent = bool(_ZOTERO_REVIEW_RE.search(lowered_query)) or has_json_attachment
+    if rewrite_intent or zotero_review_intent:
+        return list(_ZOTERO_OBSIDIAN_REQUIRED_SKILLS)
+    return []
+
+
+def _yield_skill_events_from_middleware(middleware: SSEMonitoringMiddleware):
+    for mw_evt in middleware.drain_events():
+        mw_type = mw_evt.get("event", "")
+        mw_data = mw_evt.get("data", {})
+        if mw_type == "middleware_skill_required":
+            yield {"event": "skill_required", "data": mw_data}
+        elif mw_type == "middleware_skill_read":
+            yield {"event": "skill_read", "data": mw_data}
+        elif mw_type == "middleware_skill_missing":
+            yield {"event": "skill_missing", "data": mw_data}
 
 
 def _extract_thinking(msg: "AIMessage") -> tuple[str, str]:
@@ -410,6 +453,9 @@ async def _arun_deep_agent_stream(
         language=language,
     )
     middleware.clear()  # 确保干净状态
+    middleware.set_required_skills(_infer_required_skills(query, attachments or [], session))
+    for skill_evt in _yield_skill_events_from_middleware(middleware):
+        yield skill_evt
 
     # ---- 发送初始 thinking 事件 ----
     yield {
@@ -545,6 +591,12 @@ async def _arun_deep_agent_stream(
                             _current_todos = new_todos
                             plan_steps = _todos_to_plan_steps(new_todos)
                             yield {"event": "plan_update", "data": {"plan": plan_steps}}
+                    elif mw_type == "middleware_skill_required":
+                        yield {"event": "skill_required", "data": mw_data}
+                    elif mw_type == "middleware_skill_read":
+                        yield {"event": "skill_read", "data": mw_data}
+                    elif mw_type == "middleware_skill_missing":
+                        yield {"event": "skill_missing", "data": mw_data}
 
                 # ──── messages 模式：逐 token 流式输出 ────
                 if stream_type == "messages":
@@ -674,6 +726,9 @@ async def _arun_deep_agent_stream(
             _stream_ok = False
             logger.warning(f"[DeepAgent] Stream timed out after {STREAM_TIMEOUT}s")
             yield {"event": "error", "data": {"message": f"Agent execution timed out after {STREAM_TIMEOUT}s"}}
+
+        for skill_evt in _yield_skill_events_from_middleware(middleware):
+            yield skill_evt
 
         # ---- stream 结束后的收尾 ----
         # 只有 stream 正常结束才将未完成步骤标记为 completed；
@@ -817,6 +872,7 @@ async def run_eval_task(
             skill_sources=skill_sources,
         )
         middleware.clear()
+        middleware.set_required_skills(_infer_required_skills(query, [], None))
 
         input_messages = {"messages": [HumanMessage(content=query)]}
 

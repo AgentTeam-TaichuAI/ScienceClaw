@@ -10,6 +10,17 @@ export interface TUTool {
   description: string;
   category: string;
   category_zh?: string;
+  tool_type?: string;
+  family?: string;
+  action?: string;
+  function_group?: string;
+  function_group_zh?: string;
+  discipline?: string;
+  discipline_zh?: string;
+  system_group?: string;
+  system_group_zh?: string;
+  system_subgroup?: string;
+  system_subgroup_zh?: string;
   param_count: number;
   required_params?: string[];
   has_examples?: boolean;
@@ -33,6 +44,17 @@ export interface TUToolSpec {
   return_schema: any;
   category: string;
   category_zh?: string;
+  tool_type?: string;
+  family?: string;
+  action?: string;
+  function_group?: string;
+  function_group_zh?: string;
+  discipline?: string;
+  discipline_zh?: string;
+  system_group?: string;
+  system_group_zh?: string;
+  system_subgroup?: string;
+  system_subgroup_zh?: string;
   source_file: string;
 }
 

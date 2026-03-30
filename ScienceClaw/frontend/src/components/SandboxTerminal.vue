@@ -73,7 +73,7 @@ const initTerminal = () => {
   resizeObserver.observe(terminalContainer.value);
 };
 
-const writeExecution = (toolName: string, command: string, output?: string, status?: string) => {
+const writeExecution = (command: string, output?: string, status?: string) => {
   if (!terminal) {
     initTerminal();
   }
@@ -119,7 +119,7 @@ const renderNewEntries = () => {
   const entries = props.history || [];
   while (renderedCount < entries.length) {
     const entry = entries[renderedCount];
-    writeExecution(entry.toolName, entry.command, entry.output, entry.status);
+    writeExecution(entry.command, entry.output, entry.status);
     renderedCount++;
   }
 };

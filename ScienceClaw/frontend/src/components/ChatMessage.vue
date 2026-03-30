@@ -9,12 +9,29 @@
       <div
         class="relative flex flex-col items-center rounded-2xl overflow-hidden bg-gradient-to-br from-blue-500 to-indigo-600 text-white p-3.5 ltr:rounded-br-sm rtl:rounded-bl-sm shadow-lg shadow-blue-500/15">
         <template v-for="(part, index) in parseContent(messageContent.content)" :key="index">
-          <div v-if="part.type === 'html'" v-html="part.content" class="w-full text-white/95 [&_a]:text-white [&_a]:underline [&_code]:bg-white/20 [&_code]:rounded [&_code]:px-1"></div>
+          <div
+            v-if="part.type === 'html'"
+            v-html="part.content"
+            class="message-html-content message-html-content-user w-full text-white/95"
+          ></div>
           <molecule-viewer v-else-if="part.type === 'molecule'" :src="part.src || ''" class="w-full my-2" />
           <image-viewer v-else-if="part.type === 'image'" :src="part.src || ''" :alt="part.alt" class="w-full my-2" />
           <html-viewer v-else-if="part.type === 'html-file'" :src="part.src || ''" class="w-full my-2" />
           <suggested-questions v-else-if="part.type === 'questions'" :questions="part.questions || []" @click="emit('suggestionClick', $event)" />
         </template>
+      </div>
+      <div v-if="messageContent.content" class="msg-user-inline-actions">
+        <button
+          class="msg-user-copy-pill"
+          :class="{ 'msg-user-copy-pill--copied': isCopied }"
+          @click="copyMessage"
+          :title="isCopied ? t('Message Copied') : t('Copy Message')"
+          :aria-label="isCopied ? t('Message Copied') : t('Copy Message')"
+        >
+          <CheckIcon v-if="isCopied" class="w-3.5 h-3.5" />
+          <CopyIcon v-else class="w-3.5 h-3.5" />
+          <span>{{ isCopied ? t('Copied') : t('Copy') }}</span>
+        </button>
       </div>
     </div>
   </div>
@@ -42,7 +59,7 @@
         @click="handleMarkdownClick"
       >
         <template v-for="(part, index) in parseContent(messageContent.content)" :key="index">
-          <div v-if="part.type === 'html'" v-html="part.content"></div>
+          <div v-if="part.type === 'html'" v-html="part.content" class="message-html-content"></div>
           <molecule-viewer v-else-if="part.type === 'molecule'" :src="part.src || ''" class="w-full my-2" />
           <image-viewer v-else-if="part.type === 'image'" :src="part.src || ''" :alt="part.alt" class="w-full my-2" />
           <html-viewer v-else-if="part.type === 'html-file'" :src="part.src || ''" class="w-full my-2" />
@@ -138,8 +155,7 @@
 </template>
 
 <script setup lang="ts">
-import { Message, MessageContent, AttachmentsContent } from '../types/message';
-import ToolUse from './ToolUse.vue';
+import { Message, MessageContent, AttachmentsContent, ToolContent } from '../types/message';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import hljs from 'highlight.js';
@@ -147,8 +163,8 @@ import katex from 'katex';
 import mermaid from 'mermaid';
 import { CheckIcon, ThumbsUpIcon, ThumbsDownIcon, CopyIcon, ClockIcon, WrenchIcon, ArrowDownIcon, ArrowUpIcon, FolderOpen } from 'lucide-vue-next';
 import PdfIcon from './icons/PdfIcon.vue';
-import { computed, ref, onMounted, nextTick, watch } from 'vue';
-import { ToolContent, StepContent } from '../types/message';
+import { computed, ref, onMounted, onUnmounted, nextTick, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useRelativeTime } from '../composables/useTime';
 import AttachmentsMessage from './AttachmentsMessage.vue';
 import ImageViewer from './ImageViewer.vue';
@@ -159,6 +175,8 @@ import { transformSrc, domPurifyConfig } from '../utils/content';
 import { formatMarkdown } from '../utils/markdownFormatter';
 import MarkdownEnhancements from './MarkdownEnhancements.vue';
 import { useFilePanel } from '../composables/useFilePanel';
+import { copyToClipboard } from '../utils/dom';
+import { showErrorToast, showSuccessToast } from '../utils/toast';
 
 import RobotAvatar from './icons/RobotAvatar.vue';
 
@@ -439,7 +457,7 @@ renderer.code = function(token: { text: string; lang?: string } | string, langua
 renderer.link = function(token: { href: string; title?: string | null; text: string } | string, title?: string | null, text?: string) {
   let href: string;
   let linkTitle: string | null | undefined;
-  let linkText: string;
+  let linkText = '';
 
   try {
     if (typeof token === 'object' && token !== null) {
@@ -502,13 +520,32 @@ const emit = defineEmits<{
   (e: 'convertToPdf'): void;
 }>();
 
-const handleToolClick = (tool: ToolContent) => {
-  emit('toolClick', tool);
-};
+const { t } = useI18n();
 
 // Feedback state
 const feedback = ref<'like' | 'dislike' | null>(null);
 const isCopied = ref(false);
+let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
+
+const clearCopyResetTimer = () => {
+  if (copyResetTimer) {
+    clearTimeout(copyResetTimer);
+    copyResetTimer = null;
+  }
+};
+
+const showCopiedState = () => {
+  clearCopyResetTimer();
+  isCopied.value = true;
+  copyResetTimer = setTimeout(() => {
+    isCopied.value = false;
+    copyResetTimer = null;
+  }, 2000);
+};
+
+onUnmounted(() => {
+  clearCopyResetTimer();
+});
 
 const toggleFeedback = (type: 'like' | 'dislike') => {
   if (feedback.value === type) {
@@ -521,14 +558,20 @@ const toggleFeedback = (type: 'like' | 'dislike') => {
 const copyMessage = async () => {
   try {
     const text = messageContent.value?.content || '';
-    if (!text) return;
-    await navigator.clipboard.writeText(text);
-    isCopied.value = true;
-    setTimeout(() => {
-      isCopied.value = false;
-    }, 2000);
+    if (!text.trim()) return;
+
+    const success = await copyToClipboard(text);
+    if (!success) {
+      throw new Error('Copy message returned false');
+    }
+
+    showCopiedState();
+    showSuccessToast(t('Message copied to clipboard'));
   } catch (err) {
     console.error('Failed to copy:', err);
+    isCopied.value = false;
+    clearCopyResetTimer();
+    showErrorToast(t('Failed to copy message'));
   }
 };
 
@@ -592,9 +635,7 @@ const formatTokenCount = (count: number): string => {
 };
 
 // For backward compatibility
-const stepContent = computed(() => props.message.content as StepContent);
 const messageContent = computed(() => props.message.content as MessageContent);
-const toolContent = computed(() => props.message.content as ToolContent);
 const attachmentsContent = computed(() => props.message.content as AttachmentsContent);
 
 const { relativeTime } = useRelativeTime();
@@ -621,8 +662,6 @@ const renderMarkdown = (text: string): string => {
   if (typeof text !== 'string') return '';
 
   const logPrefix = '[Markdown]';
-  const startTime = performance.now();
-
   try {
     // 步骤1：格式化 Markdown
     let formatted = formatMarkdown(text);
@@ -880,6 +919,30 @@ const parseContent = (markdown: string) => {
   to { opacity: 1; transform: translateX(0); }
 }
 
+/* 用户消息操作栏 */
+.msg-user-inline-actions {
+  @apply flex justify-end w-full pr-1 pt-1;
+}
+
+.msg-user-copy-pill {
+  @apply inline-flex items-center gap-1.5 h-8 px-3 rounded-full;
+  @apply bg-white/90 dark:bg-gray-800/80 backdrop-blur-sm;
+  @apply border border-blue-100/80 dark:border-gray-700/70;
+  @apply text-[12px] font-medium text-gray-500 dark:text-gray-300;
+  @apply shadow-sm shadow-blue-500/10;
+  @apply transition-all duration-150;
+  @apply hover:-translate-y-0.5 hover:shadow-md hover:shadow-blue-500/15;
+}
+
+.msg-user-copy-pill:hover {
+  @apply text-blue-600 dark:text-blue-300;
+}
+
+.msg-user-copy-pill--copied {
+  @apply bg-emerald-50 text-emerald-600 border-emerald-200;
+  @apply dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800/60;
+}
+
 /* 底部操作栏 */
 .msg-footer-bar {
   @apply mt-1.5 flex items-center gap-2 opacity-60 transition-opacity duration-200;
@@ -1010,6 +1073,17 @@ const parseContent = (markdown: string) => {
 .msg-stat-divider {
   @apply w-px h-3.5 mx-3;
   @apply bg-gray-300/60 dark:bg-gray-600/60;
+}
+
+.message-html-content-user :deep(a) {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.message-html-content-user :deep(code:not(pre code)) {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 0.375rem;
+  padding: 0 0.25rem;
 }
 
 /* ================================

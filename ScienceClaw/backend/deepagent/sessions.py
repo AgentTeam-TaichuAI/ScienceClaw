@@ -50,6 +50,7 @@ class ScienceSession:
     user_id: Optional[str] = None
     model_config: Optional[Dict[str, Any]] = None
     source: Optional[str] = None
+    latest_review_context: Dict[str, Any] = field(default_factory=dict)
 
     _planner_md_digest: str = field(default="", repr=False)
     events: List[Dict[str, Any]] = field(default_factory=list)
@@ -131,6 +132,7 @@ class ScienceSession:
             "latest_message_at": self.latest_message_at,
             "model_config": self.model_config,
             "source": self.source,
+            "latest_review_context": self.latest_review_context,
             "events": self.events,
             "pinned": self.pinned,
             "source": self.source,
@@ -216,6 +218,7 @@ async def async_create_science_session(
         "status": "pending",
         "events": [],
         "plan": [],
+        "latest_review_context": {},
     }
     if source:
         session_doc["source"] = source
@@ -288,6 +291,7 @@ async def async_get_science_session(session_id: str) -> ScienceSession:
         user_id=user_id,
         model_config=doc.get("model_config"),
         source=source,
+        latest_review_context=doc.get("latest_review_context", {}),
         plan=doc.get("plan", []),
         events=doc.get("events", []),
         title=doc.get("title"),
@@ -337,6 +341,7 @@ async def async_list_science_sessions(user_id: Optional[str] = None) -> List[Sci
             user_id=doc.get("user_id"),
             model_config=doc.get("model_config"),
             source=doc.get("source"),
+            latest_review_context=doc.get("latest_review_context", {}),
             title=doc.get("title"),
             status=doc.get("status", "pending"),
             created_at=doc.get("created_at", 0),
