@@ -72,6 +72,34 @@
             <!-- 结果 -->
             <div v-if="toolContent.content != null">
               <div class="text-[11px] text-[var(--text-tertiary)] mb-1.5 uppercase tracking-wider font-medium">Output</div>
+              <div
+                v-if="obsidianSummary"
+                class="mb-3 rounded-xl border border-emerald-200/70 bg-emerald-50/70 px-3 py-3 dark:border-emerald-900/60 dark:bg-emerald-950/20"
+              >
+                <div class="text-[11px] font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
+                  Obsidian Result
+                </div>
+                <div v-if="obsidianSummary.topic" class="mt-2">
+                  <div class="text-[11px] text-[var(--text-tertiary)]">Topic</div>
+                  <div class="text-[12px] leading-relaxed break-words text-[var(--text-primary)]">{{ obsidianSummary.topic }}</div>
+                </div>
+                <div v-if="obsidianSummary.reviewNotePath" class="mt-2">
+                  <div class="text-[11px] text-[var(--text-tertiary)]">Saved note</div>
+                  <code class="block text-[12px] leading-relaxed break-all text-[var(--text-primary)]">{{ obsidianSummary.reviewNotePath }}</code>
+                </div>
+                <div v-if="obsidianSummary.effectiveVaultDir" class="mt-2">
+                  <div class="text-[11px] text-[var(--text-tertiary)]">Vault</div>
+                  <code class="block text-[12px] leading-relaxed break-all text-[var(--text-primary)]">{{ obsidianSummary.effectiveVaultDir }}</code>
+                </div>
+                <div v-if="obsidianSummary.reviewInputPath" class="mt-2">
+                  <div class="text-[11px] text-[var(--text-tertiary)]">Review input</div>
+                  <code class="block text-[12px] leading-relaxed break-all text-[var(--text-primary)]">{{ obsidianSummary.reviewInputPath }}</code>
+                </div>
+                <div v-if="obsidianSummary.reviewDraftPath" class="mt-2">
+                  <div class="text-[11px] text-[var(--text-tertiary)]">Review draft</div>
+                  <code class="block text-[12px] leading-relaxed break-all text-[var(--text-primary)]">{{ obsidianSummary.reviewDraftPath }}</code>
+                </div>
+              </div>
               <pre class="text-[12px] leading-relaxed whitespace-pre-wrap break-words text-[var(--text-secondary)] bg-[var(--fill-tsp-gray-main)] rounded-lg px-3 py-2 border border-[var(--border-light)] max-h-[400px] overflow-y-auto">{{ contentJson }}</pre>
             </div>
             <!-- 空状态 -->
@@ -97,7 +125,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, toRef } from 'vue';
+import { computed, toRef } from 'vue';
 import { Minimize2, PlayIcon } from 'lucide-vue-next';
 import type { ToolContent } from '@/types/message';
 import { useToolInfo } from '@/composables/useTool';
@@ -151,6 +179,33 @@ const safeStringify = (value: any): string => {
     return String(e);
   }
 };
+
+const obsidianSummary = computed(() => {
+  const fn = props.toolContent?.function || props.toolContent?.name || '';
+  if (!fn.startsWith('obsidian_')) return null;
+
+  const content = props.toolContent?.content;
+  if (!content || typeof content !== 'object' || Array.isArray(content)) return null;
+
+  const data = content as Record<string, unknown>;
+  const topic = String(data.topic || '').trim();
+  const reviewNotePath = String(data.review_note_path || data.note_path || data.relative_note_path || '').trim();
+  const effectiveVaultDir = String(data.effective_vault_dir || data.vault_dir || '').trim();
+  const reviewInputPath = String(data.review_input_path || '').trim();
+  const reviewDraftPath = String(data.review_draft_path || '').trim();
+
+  if (!topic && !reviewNotePath && !effectiveVaultDir && !reviewInputPath && !reviewDraftPath) {
+    return null;
+  }
+
+  return {
+    topic,
+    reviewNotePath,
+    effectiveVaultDir,
+    reviewInputPath,
+    reviewDraftPath,
+  };
+});
 
 const argsJson = computed(() => safeStringify(props.toolContent?.args));
 const contentJson = computed(() => safeStringify(props.toolContent?.content));
