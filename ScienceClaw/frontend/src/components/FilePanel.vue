@@ -111,19 +111,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
-import { Download, X, FolderOpen, GripVertical, ArrowLeft } from 'lucide-vue-next'
-import { useI18n } from 'vue-i18n'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { Download, X, FolderOpen, ArrowLeft } from 'lucide-vue-next'
 import { useFilePanel } from '../composables/useFilePanel'
 import { triggerAuthenticatedDownload, type FileInfo } from '../api/file'
 import { getFileType, getFileTypeText } from '../utils/fileType'
-import { useResizeObserver } from '../composables/useResizeObserver'
 import { eventBus } from '../utils/eventBus'
 import { EVENT_SHOW_TOOL_PANEL } from '../constants/event'
 import SessionFileListContent from './SessionFileListContent.vue'
 import RoundFileListContent from './RoundFilesPopover.vue'
-
-const { t } = useI18n()
 
 const {
   isShow,

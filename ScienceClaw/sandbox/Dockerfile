@@ -1,6 +1,4 @@
-# syntax=docker/dockerfile:1.4
-#FROM ghcr.io/agent-infra/sandbox:latest
-FROM enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+FROM ghcr.io/agent-infra/sandbox:latest
 
 
 # ── 0. 统一 Python 环境为 3.12 ─────────────────────────────────────
@@ -13,19 +11,15 @@ RUN ln -sf /opt/python3.12/bin/python3.12 /usr/local/bin/python3 \
 # ── 1. 复制依赖文件 ──────────────────────────────
 COPY requirements.txt /tmp/requirements.txt
 # ── 2. 一次性安装所有依赖（系统 + Node + Python，BuildKit 缓存加速）──────────────────────
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update \
+RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential clang \
         fonts-wqy-microhei fontconfig \
         poppler-utils pandoc libreoffice-writer \
     && fc-cache -fv
-RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm config set registry ${NPM_MIRROR} \
+RUN npm config set registry ${NPM_MIRROR} \
     && npm install -g skills docx pptxgenjs
-RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
-    pip config set global.timeout 600 \
+RUN pip config set global.timeout 600 \
     && python3 -m pip install -r /tmp/requirements.txt \
     && rm -f /tmp/requirements.txt \
     && python3 -c "import matplotlib; matplotlib.get_cachedir()" \

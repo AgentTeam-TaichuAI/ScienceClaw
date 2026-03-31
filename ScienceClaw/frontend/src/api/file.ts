@@ -13,7 +13,7 @@ export interface FileInfo {
   upload_date: string;
   metadata?: Record<string, any>;
   file_url?: string;
-  category?: 'result' | 'process';
+  category?: 'result' | 'process' | 'system';
 }
 
 

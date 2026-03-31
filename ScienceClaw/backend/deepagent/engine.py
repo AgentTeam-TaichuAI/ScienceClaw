@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from loguru import logger
 from langchain_openai import ChatOpenAI
@@ -71,7 +72,6 @@ try:
 except Exception as e:
     logger.warning(f"[Engine] Failed to patch langchain-openai for reasoning_content: {e}")
 
-
 def _create_gemini_model(
     model_name: str,
     api_key: str,
@@ -89,6 +89,39 @@ def _create_gemini_model(
         max_retries=3,
         timeout=120,
     )
+try:
+    from deepagents.middleware.filesystem import FilesystemMiddleware as _DAFilesystemMiddleware
+    from langchain_core.messages import ToolMessage as _LCToolMessage
+    from langgraph.types import Command as _LGCommand
+
+    if not getattr(_DAFilesystemMiddleware, "_scienceclaw_non_tool_result_patch", False):
+        _orig_fs_intercept = _DAFilesystemMiddleware._intercept_large_tool_result
+        _orig_fs_aintercept = _DAFilesystemMiddleware._aintercept_large_tool_result
+
+        def _patched_fs_intercept_large_tool_result(self, tool_result, runtime):
+            if not isinstance(tool_result, (_LCToolMessage, _LGCommand)):
+                logger.warning(
+                    "[Engine] Passing through non-ToolMessage filesystem tool result type={}",
+                    type(tool_result).__name__,
+                )
+                return tool_result
+            return _orig_fs_intercept(self, tool_result, runtime)
+
+        async def _patched_fs_aintercept_large_tool_result(self, tool_result, runtime):
+            if not isinstance(tool_result, (_LCToolMessage, _LGCommand)):
+                logger.warning(
+                    "[Engine] Passing through non-ToolMessage filesystem tool result type={}",
+                    type(tool_result).__name__,
+                )
+                return tool_result
+            return await _orig_fs_aintercept(self, tool_result, runtime)
+
+        _DAFilesystemMiddleware._intercept_large_tool_result = _patched_fs_intercept_large_tool_result
+        _DAFilesystemMiddleware._aintercept_large_tool_result = _patched_fs_aintercept_large_tool_result
+        _DAFilesystemMiddleware._scienceclaw_non_tool_result_patch = True
+        logger.info("[Engine] Patched deepagents FilesystemMiddleware for non-ToolMessage tool results")
+except Exception as e:
+    logger.warning(f"[Engine] Failed to patch deepagents FilesystemMiddleware: {e}")
 
 # model_name 子串 → context window (tokens)
 # 匹配顺序：从上到下，先匹配先生效（更具体的模式放前面）
@@ -277,6 +310,41 @@ def _flatten_content(msg: BaseMessage) -> BaseMessage:
 
 
 _THINKING_MODEL_PATTERNS = ("minimax", "kimi", "moonshot")
+_STREAM_OPTIONS_SUPPORTED_HOST_SUFFIXES = (
+    "api.openai.com",
+    ".openai.com",
+    ".openai.azure.com",
+)
+_STREAM_OPTIONS_DISABLED_HOSTS_LOGGED: set[str] = set()
+
+
+def _resolve_base_url(base_url: Optional[str]) -> Optional[str]:
+    if base_url:
+        return base_url
+    default_base_url = getattr(settings, "model_ds_base_url", None)
+    return default_base_url or None
+
+
+def _supports_stream_options(base_url: Optional[str]) -> bool:
+    """Only send stream_options to endpoints known to support it."""
+    if not base_url:
+        return True
+
+    host = (urlparse(base_url).hostname or "").lower()
+    if not host:
+        return False
+
+    if any(host == suffix.lstrip(".") or host.endswith(suffix) for suffix in _STREAM_OPTIONS_SUPPORTED_HOST_SUFFIXES):
+        return True
+
+    if host not in _STREAM_OPTIONS_DISABLED_HOSTS_LOGGED:
+        logger.warning(
+            "[Engine] Disabling stream_options for gateway host={} base_url={}",
+            host,
+            base_url,
+        )
+        _STREAM_OPTIONS_DISABLED_HOSTS_LOGGED.add(host)
+    return False
 
 
 class _SafeChatOpenAI(ChatOpenAI):
@@ -326,6 +394,21 @@ class _SafeChatOpenAI(ChatOpenAI):
             )
         return args, kwargs
 
+    def _effective_base_url(self) -> Optional[str]:
+        return (
+            getattr(self, "openai_api_base", None)
+            or getattr(self, "base_url", None)
+            or None
+        )
+
+    def _prepare_stream_kwargs(self, kwargs: dict) -> dict:
+        kwargs = dict(kwargs)
+        if _supports_stream_options(self._effective_base_url()):
+            kwargs.setdefault("stream_options", {"include_usage": True})
+        else:
+            kwargs.pop("stream_options", None)
+        return kwargs
+
     def _generate(self, messages: List[BaseMessage], stop: Optional[List[str]] = None, run_manager: Any = None, **kwargs: Any):  # type: ignore[override]
         messages = self._ensure_reasoning_content([_flatten_content(m) for m in messages])
         try:
@@ -363,12 +446,12 @@ class _SafeChatOpenAI(ChatOpenAI):
 
     def _stream(self, *args: Any, **kwargs: Any) -> Any:  # type: ignore[override]
         args, kwargs = self._sanitize_messages(args, kwargs)
+        kwargs = self._prepare_stream_kwargs(kwargs)
         return super()._stream(*args, **kwargs)
 
     async def _astream(self, *args: Any, **kwargs: Any) -> Any:  # type: ignore[override]
         args, kwargs = self._sanitize_messages(args, kwargs)
-        if "stream_options" not in kwargs:
-            kwargs["stream_options"] = {"include_usage": True}
+        kwargs = self._prepare_stream_kwargs(kwargs)
         async for chunk in super()._astream(*args, **kwargs):
             yield chunk
 
@@ -398,10 +481,11 @@ def get_llm_model(
                    为 False 时不传 stream_options（某些 API 在非流式调用时不接受该参数）。
     """
     effective_max_tokens = max_tokens_override or settings.max_tokens
+    effective_base_url = _resolve_base_url(config.get("base_url") if config else None)
 
     # stream_options 仅在流式调用时传递，非流式调用时 API 会拒绝该参数
     extra_kwargs: Dict[str, Any] = {}
-    if streaming:
+    if streaming and _supports_stream_options(effective_base_url):
         extra_kwargs["stream_options"] = {"include_usage": True}
 
     if config:
@@ -425,7 +509,7 @@ def get_llm_model(
 
         model = _SafeChatOpenAI(
             model=model_name,
-            base_url=config.get("base_url") or settings.model_ds_base_url,
+            base_url=effective_base_url,
             api_key=config.get("api_key") or settings.model_ds_api_key,
             max_tokens=effective_max_tokens,
             max_retries=3,
@@ -440,7 +524,7 @@ def get_llm_model(
     )
     model = _SafeChatOpenAI(
         model=settings.model_ds_name,
-        base_url=settings.model_ds_base_url,
+        base_url=effective_base_url,
         api_key=settings.model_ds_api_key,
         max_tokens=effective_max_tokens,
         max_retries=3,

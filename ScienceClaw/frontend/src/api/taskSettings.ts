@@ -7,6 +7,7 @@ export interface TaskSettings {
   output_reserve: number;
   max_history_rounds: number;
   max_output_chars: number;
+  obsidian_vault_dir: string;
 }
 
 export type UpdateTaskSettingsRequest = Partial<TaskSettings>;

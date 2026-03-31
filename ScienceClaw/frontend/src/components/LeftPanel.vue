@@ -273,6 +273,9 @@ function handleAvatarLeave() {
 }
 const route = useRoute()
 const router = useRouter()
+const SESSION_LIST_REFRESH_MS = 5000;
+let sessionsRefreshTimer: ReturnType<typeof setInterval> | null = null;
+let sessionsRefreshInFlight = false;
 
 const sessions = ref<ListSessionItem[]>([])
 const scheduledTasks = ref<Task[]>([])
@@ -367,11 +370,29 @@ const fetchScheduledTasks = async () => {
 
 // Function to fetch sessions data
 const updateSessions = async () => {
+  if (sessionsRefreshInFlight) return
   try {
+    sessionsRefreshInFlight = true
     const response = await listSessions()
     sessions.value = response
   } catch (error) {
     console.error('Failed to fetch sessions:', error)
+  } finally {
+    sessionsRefreshInFlight = false
+  }
+}
+
+const refreshSidebarData = async () => {
+  if (typeof document !== 'undefined' && document.hidden) return
+  await updateSessions()
+  if (isTasksActive.value) {
+    await fetchScheduledTasks()
+  }
+}
+
+const handleVisibilityChange = () => {
+  if (typeof document !== 'undefined' && !document.hidden) {
+    void refreshSidebarData()
   }
 }
 
@@ -406,6 +427,9 @@ const debouncedRefresh = () => {
 
 onMounted(async () => {
   updateSessions()
+  sessionsRefreshTimer = setInterval(() => {
+    void refreshSidebarData()
+  }, SESSION_LIST_REFRESH_MS)
 
   setOnSessionTitleUpdate((sessionId: string, title: string) => {
     const s = sessions.value.find((x) => x.session_id === sessionId)
@@ -423,11 +447,17 @@ onMounted(async () => {
   })
 
   window.addEventListener('keydown', handleKeydown)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
 onUnmounted(() => {
   setOnSessionTitleUpdate(null)
   window.removeEventListener('keydown', handleKeydown)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  if (sessionsRefreshTimer) {
+    clearInterval(sessionsRefreshTimer)
+    sessionsRefreshTimer = null
+  }
 })
 
 watch(() => route.path, async (newPath, oldPath) => {

@@ -1,5 +1,5 @@
 <template>
-    <div class="prose prose-slate max-w-none dark:prose-invert w-full" v-html="renderedContent"></div>
+    <div class="markdown-preview-content w-full" v-html="renderedContent"></div>
 </template>
 
 <script setup lang="ts">

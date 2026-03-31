@@ -1,10 +1,10 @@
 import { computed, ref } from 'vue'
 import { ListSessionItem, SessionStatus } from '../types/response'
 
-// 筛选类型
+// 绛涢€夌被鍨?
 export type FilterType = 'all' | 'pinned' | 'running' | 'shared'
 
-// 分组类型
+// 鍒嗙粍绫诲瀷
 export interface SessionGroup {
   key: string
   label: string
@@ -12,7 +12,7 @@ export interface SessionGroup {
   collapsed: boolean
 }
 
-// 时间分组工具函数
+// 鏃堕棿鍒嗙粍宸ュ叿鍑芥暟
 function isToday(timestamp: number | null): boolean {
   if (!timestamp) return false
   const today = new Date()
@@ -42,32 +42,24 @@ function isWithinDays(timestamp: number | null, days: number): boolean {
   return diffDays > 0 && diffDays <= days
 }
 
-function isWithinMonths(timestamp: number | null, months: number): boolean {
-  if (!timestamp) return false
-  const now = new Date()
-  const date = new Date(timestamp * 1000)
-  const diffMonths = (now.getFullYear() - date.getFullYear()) * 12 + (now.getMonth() - date.getMonth())
-  return diffMonths > 0 && diffMonths <= months
-}
-
 /**
- * 会话分组和筛选 composable
+ * 浼氳瘽鍒嗙粍鍜岀瓫閫?composable
  */
 export function useSessionGrouping(sessions: { value: ListSessionItem[] }) {
-  // 当前筛选
+  // 褰撳墠绛涢€?
   const activeFilter = ref<FilterType>('all')
 
-  // 分组折叠状态
+  // 鍒嗙粍鎶樺彔鐘舵€?
   const collapsedGroups = ref<Set<string>>(new Set())
 
-  // 搜索关键词
+  // 鎼滅储鍏抽敭璇?
   const searchQuery = ref('')
 
-  // 筛选后的会话
+  // 绛涢€夊悗鐨勪細璇?
   const filteredSessions = computed(() => {
     let result = sessions.value
 
-    // 搜索过滤
+    // 鎼滅储杩囨护
     if (searchQuery.value.trim()) {
       const query = searchQuery.value.toLowerCase()
       result = result.filter(s =>
@@ -76,7 +68,7 @@ export function useSessionGrouping(sessions: { value: ListSessionItem[] }) {
       )
     }
 
-    // 类型筛选
+    // 绫诲瀷绛涢€?
     switch (activeFilter.value) {
       case 'pinned':
         result = result.filter(s => s.pinned)
@@ -95,11 +87,11 @@ export function useSessionGrouping(sessions: { value: ListSessionItem[] }) {
     return result
   })
 
-  // 分组后的会话
+  // 鍒嗙粍鍚庣殑浼氳瘽
   const groupedSessions = computed<SessionGroup[]>(() => {
     const sessionsToGroup = filteredSessions.value
 
-    // 置顶组
+    // 缃《缁?
     const pinned: ListSessionItem[] = []
     const today: ListSessionItem[] = []
     const yesterday: ListSessionItem[] = []
@@ -182,28 +174,28 @@ export function useSessionGrouping(sessions: { value: ListSessionItem[] }) {
     return groups
   })
 
-  // 切换分组折叠状态
+  // 鍒囨崲鍒嗙粍鎶樺彔鐘舵€?
   const toggleGroupCollapse = (groupKey: string) => {
     if (collapsedGroups.value.has(groupKey)) {
       collapsedGroups.value.delete(groupKey)
     } else {
       collapsedGroups.value.add(groupKey)
     }
-    // 触发响应式更新
+    // 瑙﹀彂鍝嶅簲寮忔洿鏂?
     collapsedGroups.value = new Set(collapsedGroups.value)
   }
 
-  // 设置筛选类型
+  // 璁剧疆绛涢€夌被鍨?
   const setFilter = (filter: FilterType) => {
     activeFilter.value = filter
   }
 
-  // 设置搜索关键词
+  // 璁剧疆鎼滅储鍏抽敭璇?
   const setSearchQuery = (query: string) => {
     searchQuery.value = query
   }
 
-  // 统计数据
+  // 缁熻鏁版嵁
   const stats = computed(() => ({
     all: sessions.value.length,
     pinned: sessions.value.filter(s => s.pinned).length,

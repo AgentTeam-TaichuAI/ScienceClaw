@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import os
 import time
+from pathlib import Path
 from typing import Any, Callable, Optional, Set
 
 from loguru import logger
@@ -64,6 +65,33 @@ def _make_summary(text: str, file_path: str) -> str:
     )
 
 
+def _safe_filename_component(value: str) -> str:
+    cleaned = str(value or "").strip()
+    cleaned = cleaned.replace("\\", " ").replace("/", " ")
+    for char in '<>:"|?*\r\n':
+        cleaned = cleaned.replace(char, " ")
+    cleaned = "_".join(part for part in cleaned.split() if part)
+    return cleaned[:120] or "result"
+
+
+def _extract_title_candidate(result: Any) -> Optional[str]:
+    if isinstance(result, dict):
+        for key in ("suggested_title", "topic", "title"):
+            value = str(result.get(key, "")).strip()
+            if value:
+                return value
+        review_note_path = str(result.get("review_note_path", "")).strip()
+        if review_note_path:
+            return Path(review_note_path).stem
+        for key in ("data", "result"):
+            nested = result.get(key)
+            if isinstance(nested, dict):
+                nested_title = _extract_title_candidate(nested)
+                if nested_title:
+                    return nested_title
+    return None
+
+
 class ToolResultOffloadMiddleware(AgentMiddleware):
     """Automatically offload large tool results to workspace files."""
 
@@ -85,17 +113,21 @@ class ToolResultOffloadMiddleware(AgentMiddleware):
             return True
         return len(text) > _OFFLOAD_THRESHOLD * 2
 
-    def _make_file_path(self, tool_name: str, tool_call_id: str) -> str:
+    def _make_file_path(self, tool_name: str, tool_call_id: str, result: Any) -> str:
         short_id = hashlib.md5(
             f"{tool_call_id}{time.time()}".encode()
         ).hexdigest()[:8]
         safe_name = tool_name.replace("/", "_").replace(" ", "_")
+        title_candidate = _extract_title_candidate(result)
+        if title_candidate:
+            safe_title = _safe_filename_component(title_candidate)
+            return f"{self._workspace}/{_OFFLOAD_DIR}/{safe_title}__{safe_name}_{short_id}.md"
         return f"{self._workspace}/{_OFFLOAD_DIR}/{safe_name}_{short_id}.md"
 
     async def _offload_result(
-        self, tool_name: str, tool_call_id: str, text: str
+        self, tool_name: str, tool_call_id: str, text: str, result: Any
     ) -> str:
-        file_path = self._make_file_path(tool_name, tool_call_id)
+        file_path = self._make_file_path(tool_name, tool_call_id, result)
         try:
             await self._backend.awrite(file_path, text)
             self._offload_count += 1
@@ -155,11 +187,11 @@ class ToolResultOffloadMiddleware(AgentMiddleware):
                 with concurrent.futures.ThreadPoolExecutor() as pool:
                     summary = pool.submit(
                         asyncio.run,
-                        self._offload_result(tool_name, tool_call_id, text)
+                        self._offload_result(tool_name, tool_call_id, text, result)
                     ).result()
             else:
                 summary = asyncio.run(
-                    self._offload_result(tool_name, tool_call_id, text)
+                    self._offload_result(tool_name, tool_call_id, text, result)
                 )
             return self._replace_result_text(result, summary)
         return result
@@ -169,6 +201,6 @@ class ToolResultOffloadMiddleware(AgentMiddleware):
         tool_name, tool_call_id = self._extract_tool_info(request)
         text = _extract_text(result)
         if self._should_offload(tool_name, text):
-            summary = await self._offload_result(tool_name, tool_call_id, text)
+            summary = await self._offload_result(tool_name, tool_call_id, text, result)
             return self._replace_result_text(result, summary)
         return result

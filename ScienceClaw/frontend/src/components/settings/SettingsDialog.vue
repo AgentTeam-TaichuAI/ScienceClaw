@@ -146,7 +146,7 @@ const subPageConfigs: SubPageConfig[] = [
   },
   {
     id: 'binding',
-    title: 'Lark Binding',
+    title: 'IM Binding',
     parentTabId: 'im'
   }
 ]

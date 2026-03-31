@@ -18,6 +18,7 @@ from backend.im.base import IMAdapter, IMChat, IMMessage, IMMessageFormatter, IM
 
 class LarkAdapter(IMAdapter):
     platform = IMPlatform.LARK
+    supports_card_entity = True
 
     def __init__(
         self,
@@ -100,6 +101,7 @@ class LarkAdapter(IMAdapter):
         parsed_message = IMMessage(
             platform=self.platform,
             message_id=message.get("message_id", ""),
+            delivery_id=message.get("message_id", ""),
             user=IMUser(
                 platform=self.platform,
                 platform_user_id=open_id,

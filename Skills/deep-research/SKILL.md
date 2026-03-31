@@ -461,6 +461,18 @@ cp /builtin-skills/pdf/scripts/generate_report.py /home/scienceclaw/sessionid/ge
 cp /builtin-skills/docx/scripts/generate_report.js /home/scienceclaw/sessionid/generate_report.js
 ```
 
+**Preferred fallback path**: if the workspace already has `sections/*.txt`, do not hand-write another `report_data.json` assembler on the fly. Copy and run `/skills/deep-research/scripts/build_report_data.py` instead; it prefers `research_plan.json` / `research_data/all_references.json` when available, but can also fall back to the existing section files and optionally generate the PDF directly.
+
+```bash
+cp /skills/deep-research/scripts/build_report_data.py /home/scienceclaw/sessionid/build_report_data.py
+python3 /home/scienceclaw/sessionid/build_report_data.py \
+  --base-dir /home/scienceclaw/sessionid \
+  --title "Report Title" \
+  --pdf-output /home/scienceclaw/sessionid/final_report.pdf
+```
+
+**Completion rule**: if the user asked for a PDF, the task is not complete until `final_report.pdf` actually exists. Copying `generate_report.py` or only writing `sections/*.txt` does not count as delivery.
+
 **关键**：必须用 shell `cp` 复制，不要自己写报告生成代码。
 
 ### 6.2 组装 report_data.json

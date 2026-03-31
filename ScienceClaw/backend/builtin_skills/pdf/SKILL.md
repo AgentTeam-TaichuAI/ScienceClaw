@@ -219,6 +219,8 @@ data["sections"].append({"type": "image", "path": "figures/chart.png", "caption"
 python3 generate_report.py report_data.json output_report.pdf
 ```
 
+After running the command, verify that `output_report.pdf` actually exists and is non-empty. If the user asked for a PDF, the task is not complete until the file was really created.
+
 ### Supported section types
 
 | Type | Required Fields | Optional Fields |

@@ -1,0 +1,9 @@
+{$CADDY_SITE_ADDRESS::80} {
+    @backend path /api/* /health /ready
+    reverse_proxy @backend {$BACKEND_UPSTREAM:backend:8000}
+
+    @task_service path /task-service/*
+    reverse_proxy @task_service {$TASK_SERVICE_UPSTREAM:scheduler_api:8001}
+
+    reverse_proxy {$FRONTEND_UPSTREAM:frontend:5173}
+}

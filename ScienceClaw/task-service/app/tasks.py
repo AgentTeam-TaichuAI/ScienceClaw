@@ -102,7 +102,15 @@ def _notify_start_sync(
             wh_doc = db.webhooks.find_one({"_id": wid})
             if not wh_doc:
                 continue
-            asyncio.run(send_webhook(wh_doc.get("type", "feishu"), wh_doc.get("url", ""), title, content))
+            asyncio.run(
+                send_webhook(
+                    wh_doc.get("type", "feishu"),
+                    wh_doc.get("url", ""),
+                    title,
+                    content,
+                    wh_doc.get("config") or {},
+                )
+            )
         except Exception as e:
             logger.warning(f"Failed to notify start webhook {wid}: {e}")
 
@@ -126,7 +134,15 @@ def _notify_managed_webhooks_sync(
             wh_doc = db.webhooks.find_one({"_id": wid})
             if not wh_doc:
                 continue
-            asyncio.run(send_webhook(wh_doc.get("type", "feishu"), wh_doc.get("url", ""), title, content))
+            asyncio.run(
+                send_webhook(
+                    wh_doc.get("type", "feishu"),
+                    wh_doc.get("url", ""),
+                    title,
+                    content,
+                    wh_doc.get("config") or {},
+                )
+            )
         except Exception as e:
             logger.warning(f"Failed to notify webhook {wid}: {e}")
 

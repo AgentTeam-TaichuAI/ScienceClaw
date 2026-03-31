@@ -129,7 +129,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { Loader2, Square, QrCode, RotateCw } from 'lucide-vue-next';
 import {
   getIMSystemSettings,

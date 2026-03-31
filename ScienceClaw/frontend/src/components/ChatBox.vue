@@ -193,6 +193,17 @@
                     </Popover>
                 </div>
                 <div class="flex gap-2 items-center">
+                    <button
+                        @click="handleCopyInput"
+                        :disabled="!canCopyInput"
+                        class="p-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-[var(--fill-tsp-gray-main)] disabled:opacity-30 disabled:cursor-not-allowed"
+                        :class="inputCopied ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'"
+                        :title="inputCopied ? t('Input Copied') : t('Copy Input')"
+                        :aria-label="inputCopied ? t('Input Copied') : t('Copy Input')">
+                        <Check v-if="inputCopied" :size="16" />
+                        <Copy v-else :size="16" />
+                    </button>
+
                     <button 
                         @click="handleOptimize"
                         :disabled="!hasTextInput || isOptimizing || showOptimization"
@@ -267,11 +278,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed, onMounted } from 'vue';
+import { ref, watch, computed, onMounted, onUnmounted } from 'vue';
 import SendIcon from './icons/SendIcon.vue';
 import { useI18n } from 'vue-i18n';
 import ChatBoxFiles from './ChatBoxFiles.vue';
-import { Paperclip, Wrench, Check, Box, Eye, EyeOff, Trash2, Sparkles, X, Check as CheckIcon, RefreshCw } from 'lucide-vue-next';
+import { Paperclip, Wrench, Check, Box, Eye, EyeOff, Trash2, Sparkles, X, Check as CheckIcon, RefreshCw, Copy } from 'lucide-vue-next';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import RobotAvatar from './icons/RobotAvatar.vue';
 import ProviderIcon from './icons/ProviderIcon.vue';
@@ -280,6 +291,8 @@ import type { ModelConfig } from '../api/models';
 import type { ExternalSkillItem } from '../types/response';
 import { optimizePrompt, getSkills, blockSkill, deleteSkill as apiDeleteSkill } from '../api/agent';
 import { useTextareaAutosize } from '@vueuse/core';
+import { copyToClipboard } from '../utils/dom';
+import { showErrorToast, showSuccessToast } from '../utils/toast';
 
 const props = defineProps<{
     modelValue: string;
@@ -324,10 +337,34 @@ const isModelsOpen = ref(false);
 const isOptimizing = ref(false);
 const showOptimization = ref(false);
 const optimizationResult = ref<{ original: string; optimized: string; diff: { type: 'same' | 'added' | 'removed'; value: string }[] } | null>(null);
+const inputCopied = ref(false);
+let inputCopyTimer: ReturnType<typeof setTimeout> | null = null;
 
 watch(input, (value) => {
     hasTextInput.value = value.trim() !== '';
 }, { immediate: true });
+
+const canCopyInput = computed(() => input.value.length > 0);
+
+const clearInputCopyTimer = () => {
+    if (inputCopyTimer) {
+        clearTimeout(inputCopyTimer);
+        inputCopyTimer = null;
+    }
+};
+
+const showInputCopiedState = () => {
+    clearInputCopyTimer();
+    inputCopied.value = true;
+    inputCopyTimer = setTimeout(() => {
+        inputCopied.value = false;
+        inputCopyTimer = null;
+    }, 2000);
+};
+
+onUnmounted(() => {
+    clearInputCopyTimer();
+});
 
 // ── Skills Management ──
 const externalSkills = ref<ExternalSkillItem[]>([]);
@@ -431,6 +468,25 @@ const handleKeydown = (event: KeyboardEvent) => {
 const handleSubmit = () => {
     if (!sendEnabled.value) return;
     emit('submit');
+};
+
+const handleCopyInput = async () => {
+    if (!canCopyInput.value) return;
+
+    try {
+        const success = await copyToClipboard(input.value);
+        if (success) {
+            showInputCopiedState();
+            showSuccessToast(t('Input copied to clipboard'));
+            return;
+        }
+    } catch (error) {
+        console.error('Failed to copy input', error);
+    }
+
+    inputCopied.value = false;
+    clearInputCopyTimer();
+    showErrorToast(t('Failed to copy input'));
 };
 
 const handleStop = () => {

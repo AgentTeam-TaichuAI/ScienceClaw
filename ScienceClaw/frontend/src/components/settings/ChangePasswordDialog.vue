@@ -93,7 +93,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
   DialogClose
 } from '@/components/ui/dialog'
 import { changePassword } from '@/api/auth'
