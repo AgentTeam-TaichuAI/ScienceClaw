@@ -47,6 +47,11 @@ class TaskSettings(BaseModel):
         ge=5000, le=100000,
         description="Max chars of sandbox output before truncation",
     )
+    obsidian_vault_dir: str = Field(
+        default="",
+        max_length=1024,
+        description="Preferred Obsidian vault path for materials-note tools",
+    )
 
 
 class UpdateTaskSettingsRequest(BaseModel):
@@ -56,6 +61,7 @@ class UpdateTaskSettingsRequest(BaseModel):
     output_reserve: Optional[int] = Field(default=None, ge=2048, le=65536)
     max_history_rounds: Optional[int] = Field(default=None, ge=1, le=30)
     max_output_chars: Optional[int] = Field(default=None, ge=5000, le=100000)
+    obsidian_vault_dir: Optional[str] = Field(default=None, max_length=1024)
 
 
 async def get_task_settings(user_id: str) -> TaskSettings:
