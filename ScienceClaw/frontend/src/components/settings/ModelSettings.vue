@@ -202,8 +202,8 @@
 
     <!-- Edit/Add Dialog -->
     <Dialog v-model:open="isEditOpen">
-      <DialogContent class="sm:max-w-[780px] p-0 overflow-hidden bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-gray-200/60 dark:border-gray-700/40">
-        <DialogHeader class="px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/30 flex flex-row items-center justify-between">
+      <DialogContent class="sm:max-w-[780px] p-0 flex flex-col max-h-[85vh] bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-gray-200/60 dark:border-gray-700/40">
+        <DialogHeader class="px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/30 flex flex-row items-center justify-between flex-shrink-0">
           <DialogTitle class="text-lg font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
             <div class="size-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center">
               <Box class="size-4 text-white" />
@@ -212,7 +212,7 @@
           </DialogTitle>
         </DialogHeader>
         
-        <div class="px-6 py-6 flex flex-col gap-5">
+        <div class="px-6 py-6 flex flex-col gap-5 flex-1 overflow-y-auto min-h-0">
             <!-- Provider Selection -->
              <div class="grid gap-2">
                 <label class="text-sm font-medium text-[var(--text-secondary)]">{{ t('Provider') }} <span class="text-red-500">*</span></label>
@@ -341,7 +341,7 @@
             </div>
         </div>
 
-        <DialogFooter class="px-6 py-4 bg-gray-50/50 dark:bg-gray-800/30 border-t border-gray-100 dark:border-gray-800 flex justify-between items-center">
+        <DialogFooter class="px-6 py-4 bg-gray-50/50 dark:bg-gray-800/30 border-t border-gray-100 dark:border-gray-800 flex justify-between items-center flex-shrink-0">
           <div class="text-xs text-gray-400" v-if="saving">{{ t('Verifying connection...') }}</div>
           <div class="flex gap-3 ml-auto">
             <button
@@ -409,25 +409,32 @@ const PROVIDER_CONFIG: Record<string, { base_url: string; models: string[] }> = 
   glm: {
     base_url: 'https://open.bigmodel.cn/api/paas/v4',
     models: [
-      'GLM-5', 'GLM-4.7', 'GLM-4', 'GLM-3', 'ChatGLM3',
+      'glm-5.1', 'glm-5', 'glm-5-turbo',
+      'glm-4.7', 'glm-4.7-flashx', 'glm-4.7-flash'
     ],
   },
   qwen: {
     base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     models: [
-      'Qwen3', 'Qwen2.5-72B', 'Qwen2.5-32B', 'Qwen2.5-14B', 'Qwen2.5-7B',
+      'qwen3-max', 'qwen3.6-plus', 'qwen3.5-plus', 'qwen3.5-flash',
+      'qwen-plus', 'qwen-turbo',
+      'qwen3-coder-plus',
     ],
   },
   kimi: {
-    base_url: 'https://api.moonshot.ai/v1',
+    base_url: 'https://api.moonshot.cn/v1',
     models: [
-      'kimi-k2.5', 'kimi-k2-0905-preview', 'kimi-k2-turbo-preview', 'kimi-k2-0711-preview', 'kimi-k2-thinking', 'kimi-k2-thinking-turbo',
+      'kimi-k2.5', 'kimi-k2-0905-preview', 'kimi-k2-turbo-preview',
+      'kimi-k2-0711-preview', 'kimi-k2-thinking', 'kimi-k2-thinking-turbo'
     ],
   },
   minimax: {
-    base_url: 'https://api.minimax.chat/v1',
+    base_url: 'https://api.minimaxi.com/v1',
     models: [
-      'MiniMax-M1', 'MiniMax-T1', 'abab6.5s', 'abab6.5', 'abab5.5',
+      'MiniMax-M2.7', 'MiniMax-M2.7-highspeed',
+      'MiniMax-M2.5', 'MiniMax-M2.5-highspeed',
+      'MiniMax-M2.1', 'MiniMax-M2.1-highspeed',
+      'MiniMax-M2',
     ],
   },
   taichu: {
