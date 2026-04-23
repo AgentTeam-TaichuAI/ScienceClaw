@@ -49,6 +49,8 @@ class ScienceSession:
     plan: List[PlanStep] = field(default_factory=list)
     user_id: Optional[str] = None
     model_config: Optional[Dict[str, Any]] = None
+    source: Optional[str] = None
+    latest_review_context: Dict[str, Any] = field(default_factory=dict)
 
     _planner_md_digest: str = field(default="", repr=False)
     events: List[Dict[str, Any]] = field(default_factory=list)
@@ -115,16 +117,22 @@ class ScienceSession:
 
     async def save(self):
         update_data = {
+            "thread_id": self.thread_id,
+            "user_id": self.user_id,
             "mode": self.mode,
             "plan": self.plan,
             "title": self.title,
             "status": self.status,
+            "created_at": self.created_at,
             "updated_at": int(time.time()),
+            "vm_root_dir": str(self.vm_root_dir),
             "unread_message_count": self.unread_message_count,
             "is_shared": self.is_shared,
             "latest_message": self.latest_message,
             "latest_message_at": self.latest_message_at,
             "model_config": self.model_config,
+            "source": self.source,
+            "latest_review_context": self.latest_review_context,
             "events": self.events,
             "pinned": self.pinned,
             "source": self.source,
@@ -192,9 +200,9 @@ async def async_create_science_session(
         mode=mode,
         user_id=user_id,
         model_config=model_config,
+        source=source,
         created_at=now,
         updated_at=now,
-        source=source,
     )
 
     session_doc = {
@@ -209,6 +217,7 @@ async def async_create_science_session(
         "status": "pending",
         "events": [],
         "plan": [],
+        "latest_review_context": {},
     }
     if source:
         session_doc["source"] = source
@@ -236,29 +245,63 @@ async def async_get_science_session(session_id: str) -> ScienceSession:
     if not doc:
         raise ScienceSessionNotFoundError(f"session {session_id} not found")
 
+    # Backward compatibility: some legacy/partially-upserted session docs may
+    # miss immutable identity fields. Rehydrate them with safe defaults.
+    thread_id = str(doc.get("thread_id") or session_id)
+    created_at = int(doc.get("created_at") or doc.get("updated_at") or int(time.time()))
+    user_id = doc.get("user_id")
+    if user_id is None and isinstance(doc.get("model_config"), dict):
+        user_id = doc["model_config"].get("user_id")
+    source = doc.get("source")
+    if not source:
+        im_session_doc = await db.get_collection("im_chat_sessions").find_one(
+            {"science_session_id": session_id},
+            projection={"_id": 1},
+        )
+        if im_session_doc:
+            source = "im"
+
     vm_root = Path(doc.get("vm_root_dir") or str(_session_workspace(session_id)))
     vm_root.mkdir(parents=True, exist_ok=True)
     vm_root.chmod(0o777)
 
+    missing_identity_fields = {}
+    if "thread_id" not in doc:
+        missing_identity_fields["thread_id"] = thread_id
+    if "created_at" not in doc:
+        missing_identity_fields["created_at"] = created_at
+    if "vm_root_dir" not in doc:
+        missing_identity_fields["vm_root_dir"] = str(vm_root)
+    if "user_id" not in doc and user_id is not None:
+        missing_identity_fields["user_id"] = user_id
+    if "source" not in doc and source:
+        missing_identity_fields["source"] = source
+    if missing_identity_fields:
+        await db.get_collection("sessions").update_one(
+            {"_id": session_id},
+            {"$set": missing_identity_fields},
+        )
+
     session = ScienceSession(
         session_id=session_id,
-        thread_id=doc["thread_id"],
+        thread_id=thread_id,
         vm_root_dir=vm_root,
         mode=doc.get("mode", "deep"),
-        user_id=doc.get("user_id"),
+        user_id=user_id,
         model_config=doc.get("model_config"),
+        source=source,
+        latest_review_context=doc.get("latest_review_context", {}),
         plan=doc.get("plan", []),
         events=doc.get("events", []),
         title=doc.get("title"),
         status=doc.get("status", "pending"),
-        created_at=doc.get("created_at", 0),
+        created_at=created_at,
         updated_at=doc.get("updated_at", 0),
         unread_message_count=doc.get("unread_message_count", 0),
         is_shared=doc.get("is_shared", False),
         latest_message=doc.get("latest_message", ""),
         latest_message_at=doc.get("latest_message_at", 0),
         pinned=doc.get("pinned", False),
-        source=doc.get("source"),
     )
 
     async with _sessions_lock:
@@ -295,6 +338,8 @@ async def async_list_science_sessions(user_id: Optional[str] = None) -> List[Sci
             mode=doc.get("mode", "deep"),
             user_id=doc.get("user_id"),
             model_config=doc.get("model_config"),
+            source=doc.get("source"),
+            latest_review_context=doc.get("latest_review_context", {}),
             title=doc.get("title"),
             status=doc.get("status", "pending"),
             created_at=doc.get("created_at", 0),
@@ -304,7 +349,6 @@ async def async_list_science_sessions(user_id: Optional[str] = None) -> List[Sci
             latest_message=doc.get("latest_message", ""),
             latest_message_at=doc.get("latest_message_at", 0),
             pinned=doc.get("pinned", False),
-            source=doc.get("source"),
         )
         sessions.append(s)
 

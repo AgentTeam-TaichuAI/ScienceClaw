@@ -6,7 +6,7 @@
 
 </div>
 
-ScienceClaw is a personal research assistant built with [LangChain DeepAgents](https://github.com/langchain-ai/deepagents) and [AIO Sandbox](https://github.com/agent-infra/sandbox) infrastructure, adopting a completely new architecture beyond OpenClaw. It offers stronger security, better transparency, and a more user-friendly experience.
+ScienceClaw is a personal research assistant built with [LangChain DeepAgents](https://github.com/langchain-ai/deepagents) and [AIO Sandbox](https://github.com/agent-infra/sandbox) infrastructure, adopting a completely new architecture beyond OpenClaw. It offers stronger security, better transparency, and a more user-friendly experience, while now pairing a discipline-first tool library with optional local Obsidian / Zotero workflows.
 
 <div align="center">
 
@@ -105,6 +105,14 @@ Once installed, double-click the desktop shortcut to start ScienceClaw — ready
 - [Docker](https://docs.docker.com/get-docker/) & [Docker Compose](https://docs.docker.com/compose/install/) (Docker Desktop includes Compose)
 - Recommended system RAM ≥ 8 GB
 
+#### Choose The Right Compose File
+
+| File | Use Case |
+|---|---|
+| `docker-compose-release.yml` | Recommended for most users. Pull pre-built release images directly. |
+| `docker-compose.yml` | Build from source with mounted source code and hot reload. |
+| `docker-compose-china.yml` | Build from source with China-friendly Dockerfiles and mirror registries. |
+
 #### Install & Launch
 
 **1. Get the code**
@@ -129,8 +137,7 @@ git pull
 docker compose -f docker-compose-release.yml up -d --pull always
 ```
 
-> Pulls pre-built images directly — no local compilation needed. Ready in a few minutes.
-
+> Pulls pre-built images directly — no local compilation needed. This is the best default for most users.
 
 **3. Open in browser**
 
@@ -166,7 +173,28 @@ http://localhost:5173
 docker compose up -d --build
 ```
 
-> Builds all images from source code. Ideal for developers who need to modify the code. The first build downloads dependencies and may take longer.
+> Uses `docker-compose.yml` and mounts backend, frontend, task service, `Tools/`, and `Skills/` for local iteration.
+
+For mainland China networks, use:
+
+```bash
+docker compose -f docker-compose-china.yml up -d --build
+```
+
+> Uses China-specific Dockerfiles and mirror registries to speed up dependency downloads.
+
+---
+
+### 📝 Optional — Windows Obsidian / Zotero Host Bridge
+
+If you want the Docker deployment to write into a host Obsidian vault or read local Zotero attachments, start the Windows host bridge first:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\host_bridge\start_obsidian_host_bridge.ps1 `
+  -HostReadRoots 'D:\zotero', 'C:\Users\HK\Zotero\storage'
+```
+
+All three compose files already mount `./workspace/obsidian_vault` to `/home/scienceclaw/obsidian_vault` and point backend/sandbox to `http://host.docker.internal:8765` by default. For more details, see [docs/obsidian-host-bridge.zh-CN.md](./docs/obsidian-host-bridge.zh-CN.md).
 
 ---
 
@@ -270,6 +298,8 @@ ScienceClaw can produce professional research deliverables in **4 document forma
 
 | Feature | Description |
 |---|---|
+| 🗺️ **Discipline-First Tool Library** | Browse science and external tools by discipline, function group, and your own custom categories instead of scrolling through one flat list. |
+| 📓 **Local Obsidian / Zotero Bridge** | Pick a host Obsidian vault, write literature notes back to it, and read local Zotero attachments through the optional Windows host bridge. |
 | 📨 **One-Click Feishu (Lark) Integration** | Configure Feishu webhook notifications in settings — receive task results, alerts, and reports directly in your Feishu group chat. |
 | ⏰ **Scheduled Tasks** | Set up recurring or one-time tasks with cron-like scheduling. The agent runs automatically at the specified time and delivers results via Feishu or in-app notifications. |
 | 📁 **File Management System** | Built-in file panel for browsing, previewing, and downloading all workspace files generated during agent sessions — no need to dig through directories. |
@@ -283,28 +313,25 @@ ScienceClaw can produce professional research deliverables in **4 document forma
 
 ```
 ScienceClaw/
-├── docker-compose.yml              # 10-service orchestration
-├── docker-compose-release.yml      # Pre-built image orchestration (for end users)
-├── docker-compose-china.yml        # China mirror acceleration
+├── docker-compose.yml              # Source build + hot reload
+├── docker-compose-release.yml      # Pre-built release images for most users
+├── docker-compose-china.yml        # Source build with China mirrors and Dockerfiles
+├── docs/                           # Workflow and deployment docs
+├── host_bridge/                    # Windows-side Obsidian / host file bridge
 ├── images/                         # Static assets (logo, screenshots)
-├── videos/                         # Demo videos
 ├── Tools/                          # Custom tools (hot-reload)
-├── Skills/                         # User & community skill packages
-├── workspace/                      # 🔒 Local workspace (data never leaves your machine)
+├── Skills/                         # User and community skill packages
+├── workspace/                      # Local workspace and default obsidian_vault mount
 └── ScienceClaw/
     ├── backend/                    # FastAPI backend
     │   ├── deepagent/              # Core AI agent engine (LangGraph)
-    │   ├── builtin_skills/         # 9 built-in skills (pdf, docx, pptx, xlsx, tooluniverse, ...)
-    │   ├── route/                  # REST API routes
-    │   ├── im/                     # IM integrations (Feishu / Lark)
-    │   ├── mongodb/                # Database access layer
-    │   ├── user/                   # User management
-    │   ├── scripts/                # Utility scripts (Feishu setup, etc.)
-    │   └── translations/           # i18n language packs
+    │   ├── builtin_skills/         # Built-in skills (pdf, docx, pptx, xlsx, tooluniverse, ...)
+    │   ├── route/                  # REST APIs, desktop bridge, tool library, auth
+    │   └── scripts/                # Utility scripts and migrations
     ├── frontend/                   # Vue 3 + Tailwind frontend
     ├── sandbox/                    # Isolated code execution environment
-    ├── task-service/               # Scheduled task service (cron jobs)
-    └── websearch/                  # Search & crawl microservice
+    ├── task-service/               # Scheduled task service
+    └── websearch/                  # Search and crawl microservice
 ```
 
 ---
@@ -314,35 +341,35 @@ ScienceClaw/
 ## 🧑‍💻 Useful Commands
 
 ```bash
-# First launch (recommended for most users) — pull pre-built images, no local compilation
-docker compose -f docker-compose-release.yaml up -d
+# Recommended default: use the published release images
+docker compose -f docker-compose-release.yml up -d
 
-# First launch (for developers) — build from source and start all services
+# Build from source with the standard Dockerfiles
 docker compose up -d --build
 
-# First launch (for developers in China) — build with Chinese mirror sources for faster downloads
+# Build from source on China-friendly mirrors
 docker compose -f docker-compose-china.yml up -d --build
 
-# Daily launch — fast startup, no rebuild needed
-docker compose up -d
+# Start the Windows host bridge for Obsidian / Zotero
+powershell -ExecutionPolicy Bypass -File .\host_bridge\start_obsidian_host_bridge.ps1 `
+  -HostReadRoots 'D:\zotero', 'C:\Users\HK\Zotero\storage'
 
-# Check service status
-docker compose ps
+# Check service status for the release stack
+docker compose -f docker-compose-release.yml ps
 
-# View logs (-f to follow in real time)
-docker compose logs -f backend     # Backend logs
-docker compose logs -f frontend    # Frontend logs
-docker compose logs -f sandbox     # Sandbox logs
+# View logs
+docker compose -f docker-compose-release.yml logs -f backend
+docker compose -f docker-compose-release.yml logs -f frontend
+docker compose -f docker-compose-release.yml logs -f sandbox
 
 # Restart a single service
-docker compose restart backend
+docker compose -f docker-compose-release.yml restart backend
 
-# Stop all services
-docker compose down
-
-# Stop a single service
-docker compose stop backend
+# Stop the release stack
+docker compose -f docker-compose-release.yml down
 ```
+
+> If you started the source or China stack, reuse that same compose file on `ps`, `logs`, `restart`, and `down`.
 
 ---
 
@@ -351,12 +378,14 @@ docker compose stop backend
 ScienceClaw is built entirely on Docker, so uninstalling it is clean and simple — it has **no side effects on your host system**.
 
 ```bash
-# Stop and remove all containers
-docker compose down
+# Stop and remove the release stack
+docker compose -f docker-compose-release.yml down
 
-# (Optional) Remove downloaded images to free up disk space
-docker compose down --rmi all --volumes
+# (Optional) Remove downloaded release images and volumes to free up disk space
+docker compose -f docker-compose-release.yml down --rmi all --volumes
 ```
+
+If you started with `docker-compose.yml` or `docker-compose-china.yml`, use that same compose file instead of `docker-compose-release.yml`.
 
 Then simply delete the project folder:
 

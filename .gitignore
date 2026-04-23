@@ -93,3 +93,10 @@ Desktop.ini
 workspace
 .plan
 sync-to-huawei-swr-docker.sh
+zotero/
+* TO DO list.csv
+Skill-driven review rewrite TO DO list.csv
+Tool Library Custom Browse Refactor TO DO list.csv
+Unified Tool Library TO DO list.csv
+Zotero Obsidian Skill Integration TO DO list.csv
+ScienceClaw/task-service/celerybeat-schedule

@@ -203,6 +203,67 @@
         </div>
       </div>
 
+      <div class="flex flex-col gap-4">
+        <h3 class="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider px-1 flex items-center gap-2">
+          {{ t('Research Workspace') }}
+          <span class="h-px flex-1 bg-gradient-to-r from-gray-200 dark:from-gray-700 to-transparent"></span>
+        </h3>
+
+        <div class="p-5 bg-white dark:bg-gray-800/50 border border-gray-100 dark:border-gray-700/50 rounded-2xl shadow-sm">
+          <div class="flex items-start gap-4">
+            <div class="size-10 rounded-xl bg-gradient-to-br from-fuchsia-50 to-pink-50 dark:from-fuchsia-900/30 dark:to-pink-900/30 flex items-center justify-center flex-shrink-0">
+              <FolderOpen class="size-5 text-fuchsia-500" />
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-sm font-bold text-gray-700 dark:text-gray-200">{{ t('Obsidian Vault Path') }}</span>
+              </div>
+              <p class="text-xs text-gray-400 dark:text-gray-500 mb-3">{{ t('Obsidian Vault Path Desc') }}</p>
+              <div class="flex flex-col gap-2 md:flex-row">
+                <input
+                  v-model="form.obsidian_vault_dir"
+                  type="text"
+                  class="flex-1 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 px-3 py-2.5 text-sm text-gray-700 dark:text-gray-200 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/40 focus:border-fuchsia-400"
+                  :placeholder="t('Obsidian Vault Path Placeholder')"
+                />
+                <div class="flex gap-2">
+                  <button
+                    type="button"
+                    class="px-3 py-2 text-sm font-medium rounded-xl border border-fuchsia-200 dark:border-fuchsia-800 text-fuchsia-700 dark:text-fuchsia-300 hover:bg-fuchsia-50 dark:hover:bg-fuchsia-950/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    :disabled="bridgeBusy"
+                    @click="browseObsidianVault"
+                  >
+                    <Loader2 v-if="bridgeBusy" class="size-4 animate-spin inline-block mr-1" />
+                    {{ bridgeBusy ? t('Browsing...') : t('Browse') }}
+                  </button>
+                  <button
+                    type="button"
+                    class="px-3 py-2 text-sm font-medium rounded-xl border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    :disabled="bridgeTesting || !form.obsidian_vault_dir.trim()"
+                    @click="validateObsidianVault"
+                  >
+                    <Loader2 v-if="bridgeTesting" class="size-4 animate-spin inline-block mr-1" />
+                    {{ bridgeTesting ? t('Checking...') : t('Test Vault') }}
+                  </button>
+                </div>
+              </div>
+              <p class="text-[11px] text-gray-400 dark:text-gray-500 mt-2">
+                {{ t('Obsidian Vault Path Hint') }}
+              </p>
+              <p
+                v-if="!form.obsidian_vault_dir.trim()"
+                class="text-[11px] text-amber-600 dark:text-amber-300 mt-1"
+              >
+                {{ t('Obsidian Vault Default Notice') }}
+              </p>
+              <p v-if="bridgeStatusMessage" class="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+                {{ bridgeStatusMessage }}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Action Buttons -->
       <div class="flex items-center justify-between px-1 pt-2">
         <button
@@ -227,14 +288,18 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Loader2, Timer, Terminal, Sparkles, Shield, History, FileText } from 'lucide-vue-next';
+import { Loader2, Timer, Terminal, Sparkles, Shield, History, FileText, FolderOpen } from 'lucide-vue-next';
 import { getTaskSettings, updateTaskSettings, type TaskSettings } from '@/api/taskSettings';
+import { getDesktopBridgeHealth, pickObsidianVaultDirectory, testObsidianVault } from '@/api/desktopBridge';
 import { showSuccessToast, showErrorToast } from '@/utils/toast';
 
 const { t } = useI18n();
 
 const loading = ref(false);
 const saving = ref(false);
+const bridgeBusy = ref(false);
+const bridgeTesting = ref(false);
+const bridgeStatusMessage = ref('');
 
 const DEFAULTS: TaskSettings = {
   agent_stream_timeout: 10800,
@@ -243,6 +308,7 @@ const DEFAULTS: TaskSettings = {
   output_reserve: 16384,
   max_history_rounds: 10,
   max_output_chars: 50000,
+  obsidian_vault_dir: '',
 };
 
 const original = ref<TaskSettings>({ ...DEFAULTS });
@@ -288,6 +354,64 @@ const saveSettings = async () => {
   }
 };
 
+const persistObsidianVaultPath = async (vaultDir: string) => {
+  const data = await updateTaskSettings({ obsidian_vault_dir: vaultDir });
+  Object.assign(form, data);
+  original.value = { ...data };
+};
+
+const browseObsidianVault = async () => {
+  bridgeBusy.value = true;
+  try {
+    const result = await pickObsidianVaultDirectory({
+      title: t('Select Obsidian Vault'),
+      initial_dir: form.obsidian_vault_dir,
+    });
+    if (result.cancelled) {
+      bridgeStatusMessage.value = t('Directory selection cancelled');
+      return;
+    }
+    if (result.path) {
+      form.obsidian_vault_dir = result.path;
+      try {
+        await persistObsidianVaultPath(result.path);
+        bridgeStatusMessage.value = t('Directory selected and saved');
+        showSuccessToast(t('Task settings saved'));
+      } catch (saveErr: any) {
+        console.error(saveErr);
+        bridgeStatusMessage.value = t('Directory selected. Click Save to persist');
+        showErrorToast(saveErr.response?.data?.detail || t('Failed to save task settings'));
+      }
+    }
+  } catch (err: any) {
+    console.error(err);
+    showErrorToast(err.response?.data?.detail || t('Failed to browse Obsidian vault'));
+  } finally {
+    bridgeBusy.value = false;
+  }
+};
+
+const validateObsidianVault = async () => {
+  if (!form.obsidian_vault_dir.trim()) return;
+  bridgeTesting.value = true;
+  try {
+    const result = await testObsidianVault({
+      vault_dir: form.obsidian_vault_dir.trim(),
+      create_if_missing: false,
+      bootstrap_materials: false,
+    });
+    bridgeStatusMessage.value = result.has_obsidian_config
+      ? t('Obsidian vault is reachable')
+      : t('Directory is reachable but .obsidian was not found');
+    showSuccessToast(t('Obsidian vault check passed'));
+  } catch (err: any) {
+    console.error(err);
+    showErrorToast(err.response?.data?.detail || t('Failed to validate Obsidian vault'));
+  } finally {
+    bridgeTesting.value = false;
+  }
+};
+
 const formatDuration = (seconds: number): string => {
   if (seconds >= 3600) {
     const h = Math.floor(seconds / 3600);
@@ -312,5 +436,14 @@ const resetToDefaults = () => {
 
 onMounted(() => {
   fetchSettings();
+  getDesktopBridgeHealth()
+    .then((status) => {
+      bridgeStatusMessage.value = status.available
+        ? t('Desktop bridge is ready')
+        : (status.error || t('Desktop bridge is unavailable'));
+    })
+    .catch(() => {
+      bridgeStatusMessage.value = t('Desktop bridge is unavailable');
+    });
 });
 </script>

@@ -27,3 +27,123 @@ body,html {
 .ltr\:border-l {
   border-left-width: 1px;
 }
+
+.markdown-preview-content {
+  color: var(--text-primary);
+  line-height: 1.75;
+}
+
+.markdown-preview-content > :first-child {
+  margin-top: 0;
+}
+
+.markdown-preview-content > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-preview-content h1,
+.markdown-preview-content h2,
+.markdown-preview-content h3,
+.markdown-preview-content h4,
+.markdown-preview-content h5,
+.markdown-preview-content h6 {
+  margin: 1.4rem 0 0.7rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.markdown-preview-content h1 {
+  font-size: 1.75rem;
+}
+
+.markdown-preview-content h2 {
+  font-size: 1.45rem;
+}
+
+.markdown-preview-content h3 {
+  font-size: 1.2rem;
+}
+
+.markdown-preview-content p,
+.markdown-preview-content ul,
+.markdown-preview-content ol,
+.markdown-preview-content pre,
+.markdown-preview-content blockquote,
+.markdown-preview-content table {
+  margin: 0.9rem 0;
+}
+
+.markdown-preview-content ul,
+.markdown-preview-content ol {
+  padding-left: 1.35rem;
+}
+
+.markdown-preview-content li + li {
+  margin-top: 0.35rem;
+}
+
+.markdown-preview-content a {
+  color: rgb(37, 99, 235);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.markdown-preview-content code {
+  border-radius: 0.45rem;
+  background: rgba(15, 23, 42, 0.08);
+  padding: 0.15rem 0.45rem;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.9em;
+}
+
+.markdown-preview-content pre {
+  overflow-x: auto;
+  border-radius: 1rem;
+  background: rgb(15, 23, 42);
+  padding: 1rem 1.1rem;
+  color: rgb(226, 232, 240);
+}
+
+.markdown-preview-content pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+
+.markdown-preview-content blockquote {
+  border-left: 3px solid rgba(59, 130, 246, 0.45);
+  padding-left: 1rem;
+  color: var(--text-secondary);
+}
+
+.markdown-preview-content table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.markdown-preview-content th,
+.markdown-preview-content td {
+  border: 1px solid var(--border-light);
+  padding: 0.65rem 0.8rem;
+  text-align: left;
+}
+
+.markdown-preview-content th {
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.dark .markdown-preview-content a {
+  color: rgb(96, 165, 250);
+}
+
+.dark .markdown-preview-content code {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.dark .markdown-preview-content blockquote {
+  color: var(--text-tertiary);
+}
+
+.dark .markdown-preview-content th {
+  background: rgba(255, 255, 255, 0.06);
+}

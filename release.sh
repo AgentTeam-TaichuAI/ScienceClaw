@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 启用 BuildKit（Dockerfile 中 apt/pip/npm 缓存挂载需要）
 export DOCKER_BUILDKIT=1
 VERSION="v0.0.4"
 
@@ -16,9 +15,6 @@ VERSION="v0.0.4"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCIENCECLAW="${SCRIPT_DIR}/ScienceClaw"
 PLATFORMS="linux/amd64,linux/arm64"
-
-# 可选: 设置 REGISTRY 后镜像名为 $REGISTRY/目录名:日期，并执行 push
-# 例如: REGISTRY=myregistry.io/myuser ./new_release.sh
 REGISTRY="${REGISTRY:-swr.cn-north-4.myhuaweicloud.com/claw}"
 COMPOSE_RELEASE="${SCRIPT_DIR}/docker-compose-release.yml"
 
@@ -27,15 +23,14 @@ if [[ ! -d "$SCIENCECLAW" ]]; then
   exit 1
 fi
 
-# 收集待构建模块列表
-TARGETS=("$@")
-
+targets=("$@")
 modules=()
-if [[ ${#TARGETS[@]} -gt 0 ]]; then
-  for t in "${TARGETS[@]}"; do
-    dir="${SCIENCECLAW}/${t}"
+
+if [[ ${#targets[@]} -gt 0 ]]; then
+  for target in "${targets[@]}"; do
+    dir="${SCIENCECLAW}/${target}"
     if [[ ! -d "$dir" ]]; then
-      echo "Error: module not found: $t"
+      echo "Error: module not found: $target"
       exit 1
     fi
     modules+=("$dir")
@@ -56,36 +51,38 @@ for dir in "${modules[@]}"; do
 
   if [[ -n "$REGISTRY" ]]; then
     image="${REGISTRY}/${name}:release-${VERSION}"
-    push_flag="--push"
+    push_flag=(--push)
+    cache_flags=(
+      --cache-from "type=registry,ref=${REGISTRY}/${name}:buildcache"
+      --cache-to "type=registry,ref=${REGISTRY}/${name}:buildcache,mode=max"
+    )
   else
     image="${name}:release-${VERSION}"
-    push_flag=""
+    push_flag=()
+    cache_flags=()
   fi
 
-  extra_contexts=""
+  extra_contexts=()
   if grep -q '\-\-from=websearch' "$dockerfile" 2>/dev/null; then
-    extra_contexts="--build-context websearch=${SCIENCECLAW}/websearch"
+    extra_contexts=(--build-context "websearch=${SCIENCECLAW}/websearch")
   fi
-  cache_repo="${REGISTRY}/${name}:buildcache"
+
   echo "Building: $image (platforms: $PLATFORMS)"
   docker buildx build \
     --builder scienceclaw-builder \
     --platform "$PLATFORMS" \
     --provenance=false \
-    --sbom=false \
-    --cache-from "type=registry,ref=${cache_repo}" \
-    --cache-to   "type=registry,ref=${cache_repo},mode=max" \
+    "${cache_flags[@]}" \
     -t "$image" \
     -f "$dockerfile" \
-    $extra_contexts \
-    $push_flag \
+    "${extra_contexts[@]}" \
+    "${push_flag[@]}" \
     "$dir"
 
-  # 构建成功后更新 docker-compose-release.yml 中对应 image 标签
   if [[ -f "$COMPOSE_RELEASE" ]]; then
-    basename_dir="$(basename "$dir")"
-    sed -i '' "s|^[[:space:]]*image:.*${basename_dir}:.*|    image: ${image}|g" "$COMPOSE_RELEASE"
-    echo "Updated compose-release: ${basename_dir} -> ${image}"
+    module_name="$(basename "$dir")"
+    sed -i.bak -E "s|(^[[:space:]]*image:[[:space:]]*).*/scienceclaw-${module_name}:release-v[^[:space:]]+|\\1${image}|g" "$COMPOSE_RELEASE"
+    rm -f "${COMPOSE_RELEASE}.bak"
   fi
 done
 

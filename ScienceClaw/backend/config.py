@@ -53,6 +53,12 @@ class Settings(BaseSettings):
     lark_enabled: bool = os.environ.get("LARK_ENABLED", "false").lower() == "true"
     lark_app_id: str = os.environ.get("LARK_APP_ID", "")
     lark_app_secret: str = os.environ.get("LARK_APP_SECRET", "")
+    telegram_enabled: bool = os.environ.get("TELEGRAM_ENABLED", "false").lower() == "true"
+    telegram_bot_token: str = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    telegram_ingress_mode: str = os.environ.get("TELEGRAM_INGRESS_MODE", "polling")
+    telegram_webhook_secret: str = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
+    telegram_public_base_url: str = os.environ.get("TELEGRAM_PUBLIC_BASE_URL", "")
+    public_base_url: str = os.environ.get("PUBLIC_BASE_URL", "")
 
     # class Config:
     #     env_prefix = 'APP_'

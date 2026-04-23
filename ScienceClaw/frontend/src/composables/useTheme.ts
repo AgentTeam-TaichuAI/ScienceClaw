@@ -1,4 +1,4 @@
-import { ref, watch, onMounted } from 'vue';
+import { ref } from 'vue';
 
 const THEME_KEY = 'scienceclaw-theme';
 const isDark = ref(false);

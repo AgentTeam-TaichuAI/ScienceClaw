@@ -4,7 +4,8 @@ export enum SessionStatus {
     PENDING = "pending",
     RUNNING = "running",
     WAITING = "waiting",
-    COMPLETED = "completed"
+    COMPLETED = "completed",
+    FAILED = "failed"
 }
 
 export interface CreateSessionResponse {
@@ -19,6 +20,7 @@ export interface GetSessionResponse {
     is_shared: boolean;
     mode: string;
     model_config_id: string | null;
+    source?: string | null;
 }
 
 export interface ListSessionItem {
@@ -71,6 +73,7 @@ export interface SharedSessionResponse {
     status: SessionStatus;
     events: AgentSSEEvent[];
     is_shared: boolean;
+    source?: string | null;
 }
 
 export interface SkillItem {
@@ -84,12 +87,47 @@ export interface ExternalSkillItem {
     files: string[];
     blocked: boolean;
     builtin?: boolean;
+    metadata?: Record<string, any>;
+}
+
+export interface InstallSkillResponse {
+    installed: boolean;
+    skill_name: string;
+    description: string;
+    files: string[];
+    metadata?: Record<string, any>;
+    source: string;
+    normalized_source: string;
+    requested_skill?: string;
+    installed_directory: string;
+    available_skills: string[];
+    manifest_file: string;
 }
 
 export interface ExternalToolItem {
     name: string;
+    tool_name?: string;
     description: string;
     file: string;
+    source_file?: string;
     blocked: boolean;
+    category: string;
+    subcategory: string;
+    tags: string[];
+    parameters?: {
+        type: string;
+        properties: Record<string, any>;
+        required?: string[];
+    };
+    examples?: Record<string, any>[];
+    return_schema?: any;
+    runner?: string;
+    function_group?: string;
+    function_group_zh?: string;
+    discipline?: string;
+    discipline_zh?: string;
+    system_group?: string;
+    system_group_zh?: string;
+    system_subgroup?: string;
+    system_subgroup_zh?: string;
 }
-  

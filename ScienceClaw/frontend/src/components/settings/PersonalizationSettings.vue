@@ -29,7 +29,7 @@
         <div class="flex flex-col gap-2">
           <!-- Existing items -->
           <div
-            v-for="(item, iIdx) in section.items"
+            v-for="(_, iIdx) in section.items"
             :key="iIdx"
             class="group flex items-start gap-2"
           >

@@ -10,7 +10,6 @@ import MarkdownFileIcon from '../components/icons/MarkdownFileIcon.vue';
 import ArchiveFileIcon from '../components/icons/ArchiveFileIcon.vue';
 import VideoFileIcon from '../components/icons/VideoFileIcon.vue';
 import AudioFileIcon from '../components/icons/AudioFileIcon.vue';
-import TextFileIcon from '../components/icons/TextFileIcon.vue';
 import PptFileIcon from '../components/icons/PptFileIcon.vue';
 import UnknownFilePreview from '../components/filePreviews/UnknownFilePreview.vue';
 import MarkdownFilePreview from '../components/filePreviews/MarkdownFilePreview.vue';

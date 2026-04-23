@@ -1,6 +1,6 @@
 import { apiClient, ApiResponse, createSSEConnection, SSECallbacks } from './client';
 import type { FileInfo } from './file';
-import { ListSessionItem, SessionStatus, GetSessionResponse, SkillItem, ExternalSkillItem, ExternalToolItem } from '../types/response';
+import { ListSessionItem, GetSessionResponse, ExternalSkillItem, ExternalToolItem, InstallSkillResponse } from '../types/response';
 
 // Re-export or alias if needed for backward compatibility, 
 // but prefer using types from response.ts to ensure consistency.
@@ -120,6 +120,11 @@ export async function getSkills(): Promise<ExternalSkillItem[]> {
   return response.data.data;
 }
 
+export async function installSkill(data: { source: string; skill_name?: string; overwrite?: boolean }): Promise<InstallSkillResponse> {
+  const response = await apiClient.post<ApiResponse<InstallSkillResponse>>('/sessions/skills/install', data);
+  return response.data.data;
+}
+
 export async function blockSkill(skillName: string, blocked: boolean): Promise<{skill_name: string, blocked: boolean}> {
   const response = await apiClient.put<ApiResponse<{skill_name: string, blocked: boolean}>>(`/sessions/skills/${encodeURIComponent(skillName)}/block`, { blocked });
   return response.data.data;
@@ -169,6 +174,53 @@ export async function deleteTool(toolName: string): Promise<{tool_name: string, 
 
 export async function readToolFile(toolName: string): Promise<{file: string, content: string}> {
   const response = await apiClient.post<ApiResponse<{file: string, content: string}>>(`/sessions/tools/${encodeURIComponent(toolName)}/read`);
+  return response.data.data;
+}
+
+export interface ExternalToolSpec {
+  name: string;
+  tool_name?: string;
+  description: string;
+  file: string;
+  source_file?: string;
+  blocked?: boolean;
+  category: string;
+  subcategory: string;
+  tags: string[];
+  parameters: {
+    type: string;
+    properties: Record<string, any>;
+    required?: string[];
+  };
+  examples?: Record<string, any>[];
+  return_schema?: any;
+  runner?: string;
+  function_group?: string;
+  function_group_zh?: string;
+  discipline?: string;
+  discipline_zh?: string;
+  system_group?: string;
+  system_group_zh?: string;
+  system_subgroup?: string;
+  system_subgroup_zh?: string;
+}
+
+export interface ExternalToolRunResponse {
+  success: boolean;
+  result: any;
+  stdout?: string;
+  runner?: Record<string, any>;
+}
+
+export async function getToolSpec(toolName: string): Promise<ExternalToolSpec> {
+  const response = await apiClient.get<ApiResponse<ExternalToolSpec>>(`/sessions/tools/${encodeURIComponent(toolName)}/spec`);
+  return response.data.data;
+}
+
+export async function runExternalTool(toolName: string, args: Record<string, any>): Promise<ExternalToolRunResponse> {
+  const response = await apiClient.post<ApiResponse<ExternalToolRunResponse>>(`/sessions/tools/${encodeURIComponent(toolName)}/run`, {
+    arguments: args,
+  });
   return response.data.data;
 }
 

@@ -247,7 +247,7 @@
 
               <!-- Chart Area -->
               <div class="ml-14 h-40 flex items-end gap-1">
-                <div v-for="(point, index) in trendsData" :key="point.date"
+                <div v-for="point in trendsData" :key="point.date"
                   class="flex-1 flex flex-col items-center group">
                   <!-- Bar -->
                   <div class="w-full relative flex justify-center">

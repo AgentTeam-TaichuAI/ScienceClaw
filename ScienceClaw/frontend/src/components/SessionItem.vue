@@ -22,8 +22,7 @@
       <div class="status-dot flex-shrink-0 w-1.5 h-1.5 rounded-full mt-1.5 transition-colors duration-200"
         :class="{
           'bg-blue-500': isCurrentSession,
-          'bg-amber-400': isRunning,
-          'bg-amber-400': session.pinned && !isRunning,
+          'bg-amber-400': isRunning || (session.pinned && !isRunning),
           'bg-gray-300 dark:bg-gray-600': !isCurrentSession && !isRunning && !session.pinned
         }">
       </div>
@@ -134,7 +133,7 @@
 
 <script setup lang="ts">
 import { Pencil, Pin, Trash2, Globe } from 'lucide-vue-next';
-import { computed, ref, nextTick, watch } from 'vue';
+import { computed, ref, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import { useCustomTime } from '../composables/useTime';
@@ -190,6 +189,9 @@ const isRunning = computed(() => {
 });
 
 const handleSessionClick = () => {
+  if (isSwiping.value) {
+    return;
+  }
   router.push(`/chat/${props.session.session_id}`);
 
   // Auto close left panel on mobile/tablet
@@ -238,6 +240,50 @@ const confirmRename = async () => {
 const cancelRename = () => {
   isRenaming.value = false;
   newTitle.value = '';
+};
+
+const handleTouchStart = (event: TouchEvent) => {
+  const touch = event.touches[0];
+  if (!touch) return;
+  touchStartX.value = touch.clientX;
+  touchStartY.value = touch.clientY;
+  isSwiping.value = false;
+};
+
+const handleTouchMove = (event: TouchEvent) => {
+  const touch = event.touches[0];
+  if (!touch) return;
+
+  const deltaX = touch.clientX - touchStartX.value;
+  const deltaY = touch.clientY - touchStartY.value;
+
+  if (!isSwiping.value) {
+    const isHorizontalSwipe = Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > SWIPE_THRESHOLD;
+    if (!isHorizontalSwipe) {
+      return;
+    }
+    isSwiping.value = true;
+  }
+
+  swipeOffset.value = Math.max(-DELETE_THRESHOLD - 40, Math.min(0, deltaX));
+  if (Math.abs(swipeOffset.value) > SWIPE_THRESHOLD) {
+    event.preventDefault();
+  }
+};
+
+const handleTouchEnd = () => {
+  if (!isSwiping.value) {
+    swipeOffset.value = 0;
+    return;
+  }
+
+  const shouldDelete = Math.abs(swipeOffset.value) >= DELETE_THRESHOLD;
+  swipeOffset.value = 0;
+  isSwiping.value = false;
+
+  if (shouldDelete) {
+    handleDeleteClick();
+  }
 };
 
 const handleDeleteClick = () => {

@@ -149,8 +149,8 @@ const hide = () => {
   visible.value = false;
 };
 
-const writeExecution = (toolName: string, command: string, output?: string, status?: string) => {
-  terminalRef.value?.writeExecution(toolName, command, output, status);
+const writeExecution = (command: string, output?: string, status?: string) => {
+  terminalRef.value?.writeExecution(command, output, status);
 };
 
 defineExpose({ show, hide, visible, writeExecution });

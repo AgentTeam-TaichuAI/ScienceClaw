@@ -18,6 +18,8 @@ Sessions 路由。
 from __future__ import annotations
 
 import asyncio
+import ast
+import inspect
 import json
 import os
 import re
@@ -49,6 +51,7 @@ from backend.deepagent.sessions import (
     async_get_science_session,
     async_list_science_sessions,
 )
+from backend.skill_installer import SkillInstallerError, install_skill_into_directory
 from backend.user.dependencies import get_current_user, require_user, User
 from backend.models import get_model_config
 
@@ -79,6 +82,7 @@ class SessionStatus:
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
+    FAILED = "failed"
 
 
 class ListSessionItem(BaseModel):
@@ -106,6 +110,7 @@ class GetSessionData(BaseModel):
     is_shared: bool = Field(default=False, description="Whether shared")
     mode: str = Field(default="deep", description="Session mode")
     model_config_id: Optional[str] = Field(default=None, description="Model config ID")
+    source: Optional[str] = Field(default=None, description="Session source, e.g. 'im'")
 
 
 class ChatRequest(BaseModel):
@@ -158,11 +163,19 @@ def _append_session_event(session: Any, event: Dict[str, Any]) -> None:
         events = []
         setattr(session, "events", events)
     events.append(event)
+    _update_session_review_context_from_event(session, event)
     if event.get("event") == "message":
         data = event.get("data") or {}
         content = data.get("content")
         if isinstance(content, str) and content.strip():
             setattr(session, "latest_message", content)
+            setattr(session, "latest_message_at", int(data.get("timestamp") or _now_ts()))
+    elif event.get("event") == "error":
+        data = event.get("data") or {}
+        error = data.get("error")
+        if isinstance(error, str) and error.strip():
+            trimmed = error[:500] if len(error) > 500 else error
+            setattr(session, "latest_message", trimmed)
             setattr(session, "latest_message_at", int(data.get("timestamp") or _now_ts()))
 
 
@@ -174,6 +187,299 @@ def _count_user_messages(events: List[Dict[str, Any]]) -> int:
         1 for ev in events
         if ev.get("event") == "message" and (ev.get("data") or {}).get("role") == "user"
     )
+
+
+def _events_after_cursor(events: List[Dict[str, Any]], cursor: Optional[str]) -> List[Dict[str, Any]]:
+    if not cursor:
+        return list(events or [])
+    found_cursor = False
+    replay: List[Dict[str, Any]] = []
+    for evt in list(events or []):
+        evt_data = evt.get("data", {}) or {}
+        if not found_cursor:
+            if evt_data.get("event_id") == cursor:
+                found_cursor = True
+            continue
+        replay.append(evt)
+    return replay
+
+
+def _extract_tool_error_message(content: Any) -> Optional[str]:
+    if isinstance(content, dict):
+        error = content.get("error")
+        if isinstance(error, str) and error.strip():
+            return error.strip()
+        return None
+
+    if isinstance(content, str):
+        text = content.strip()
+        if not text:
+            return None
+        try:
+            parsed = json.loads(text)
+        except (TypeError, json.JSONDecodeError):
+            parsed = None
+        if isinstance(parsed, dict):
+            error = parsed.get("error")
+            if isinstance(error, str) and error.strip():
+                return error.strip()
+        match = re.search(r'"error"\s*:\s*"([^"]+)"', text)
+        if match:
+            return match.group(1).strip()
+    return None
+
+
+_OVERWRITE_CONFIRM_RE = re.compile(
+    r"^\s*(继续|继续执行|开始|开始覆盖|确认|确认覆盖|覆盖|覆盖写回|写回|同意|可以|好|好的|行|执行|继续吧|开始吧|yes|y|ok|okay|confirm|overwrite)\s*[。.!！]?\s*$",
+    re.IGNORECASE,
+)
+_OVERWRITE_NEGATIVE_RE = re.compile(
+    r"(不要|先别|暂不|不用|不覆盖|not now|don't|do not|cancel)",
+    re.IGNORECASE,
+)
+
+_REQUIRED_REVIEW_SKILLS = [
+    "zotero-materials-review",
+    "literature-review",
+    "scientific-writing",
+    "obsidian-markdown",
+    "materials-obsidian",
+]
+_REVIEW_REWRITE_RE = re.compile(
+    r"(改写|改成|继续修改|继续改写|继续润色|润色|科研|论文|学术|GB/T\s*7714|GB7714|综述)",
+    re.IGNORECASE,
+)
+
+
+def _latest_assistant_message(events: List[Dict[str, Any]]) -> str:
+    for event in reversed(events or []):
+        if event.get("event") != "message":
+            continue
+        data = event.get("data") or {}
+        if data.get("role") != "assistant":
+            continue
+        content = data.get("content")
+        if isinstance(content, str) and content.strip():
+            return content.strip()
+    return ""
+
+
+def _assistant_waits_for_overwrite_confirmation(message: str) -> bool:
+    text = (message or "").strip().lower()
+    if not text:
+        return False
+
+    if "overwrite_existing=true" in text or "overwrite=true" in text:
+        return True
+    if "note already exists" in text or "review note already exists" in text:
+        return True
+    if "replace it" in text or "replace the existing" in text:
+        return True
+
+    overwrite_keywords = ("覆盖", "覆写", "写回", "替换", "已存在", "已有")
+    confirm_keywords = ("请直接回复", "确认", "开始", "继续", "同意", "执行")
+    return any(keyword in text for keyword in overwrite_keywords) and any(
+        keyword in text for keyword in confirm_keywords
+    )
+
+
+def _is_short_overwrite_confirmation(message: str) -> bool:
+    text = (message or "").strip()
+    if not text or len(text) > 24:
+        return False
+    if _OVERWRITE_NEGATIVE_RE.search(text):
+        return False
+    return bool(_OVERWRITE_CONFIRM_RE.match(text))
+
+
+def _augment_agent_query_for_overwrite_confirmation(
+    message: str,
+    events: List[Dict[str, Any]],
+) -> str:
+    if not _is_short_overwrite_confirmation(message):
+        return message
+
+    last_assistant_message = _latest_assistant_message(events)
+    if not _assistant_waits_for_overwrite_confirmation(last_assistant_message):
+        return message
+
+    return (
+        f"{message.strip()}\n\n"
+        "[Workflow hint: The user is explicitly approving overwrite of the existing Obsidian note. "
+        "Proceed now with overwrite_existing=true or overwrite=true as needed, and do not ask for another confirmation.]"
+    )
+
+
+def _safe_json_object(raw_value: Any) -> Dict[str, Any]:
+    if isinstance(raw_value, dict):
+        return raw_value
+    if not isinstance(raw_value, str) or not raw_value.strip():
+        return {}
+    try:
+        parsed = json.loads(raw_value)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _extract_review_context_from_tool_event(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if event.get("event") != "tool":
+        return None
+
+    data = event.get("data") or {}
+    if str(data.get("status") or "") != "called":
+        return None
+
+    content = data.get("content")
+    if not isinstance(content, dict) or not content.get("ok"):
+        return None
+
+    tool_function = str(data.get("function") or data.get("name") or "").strip()
+    args = data.get("args") if isinstance(data.get("args"), dict) else {}
+    metadata = _safe_json_object(args.get("metadata_json"))
+
+    review_note_path = ""
+    topic = ""
+    review_input_path = ""
+    review_draft_path = ""
+    review_bundle_path = ""
+    effective_vault_dir = str(content.get("effective_vault_dir", "")).strip()
+
+    if tool_function in {"obsidian_run_zotero_review_agent", "obsidian_rewrite_materials_review_note"}:
+        review_note_path = str(content.get("review_note_path", "")).strip()
+        topic = str(content.get("topic", "")).strip() or str(args.get("topic", "")).strip()
+        review_input_path = str(content.get("review_input_path", "")).strip()
+        review_draft_path = str(content.get("review_draft_path", "")).strip()
+        review_bundle_path = str(content.get("bundle_path", "")).strip() or str(content.get("review_bundle_path", "")).strip()
+    elif tool_function == "obsidian_write_materials_note":
+        note_type = str(args.get("note_type", "")).strip().lower()
+        if note_type != "review":
+            return None
+        review_note_path = str(content.get("note_path", "")).strip() or str(content.get("relative_note_path", "")).strip()
+        topic = str(metadata.get("topic", "")).strip() or str(args.get("title", "")).strip()
+        review_input_path = str(metadata.get("review_input_path", "")).strip()
+        review_draft_path = str(metadata.get("review_draft_path", "")).strip()
+        review_bundle_path = str(metadata.get("review_bundle_path", "")).strip()
+    else:
+        return None
+
+    if not review_note_path:
+        return None
+
+    return {
+        "review_note_path": review_note_path,
+        "topic": topic,
+        "review_input_path": review_input_path,
+        "review_draft_path": review_draft_path,
+        "review_bundle_path": review_bundle_path,
+        "effective_vault_dir": effective_vault_dir,
+        "updated_at": int(data.get("timestamp") or _now_ts()),
+    }
+
+
+def _update_session_review_context_from_event(session: Any, event: Dict[str, Any]) -> None:
+    context = _extract_review_context_from_tool_event(event)
+    if not context:
+        return
+    current = getattr(session, "latest_review_context", {}) or {}
+    merged = dict(current)
+    merged.update({key: value for key, value in context.items() if value not in ("", None, [])})
+    setattr(session, "latest_review_context", merged)
+
+
+def _augment_agent_query_for_review_rewrite(message: str, session: Any) -> str:
+    text = (message or "").strip()
+    context = getattr(session, "latest_review_context", {}) or {}
+    if not text or not context or not _REVIEW_REWRITE_RE.search(text):
+        return message
+
+    review_note_path = str(context.get("review_note_path", "")).strip()
+    topic = str(context.get("topic", "")).strip()
+    review_input_path = str(context.get("review_input_path", "")).strip()
+    review_draft_path = str(context.get("review_draft_path", "")).strip()
+    review_bundle_path = str(context.get("review_bundle_path", "")).strip()
+    effective_vault_dir = str(context.get("effective_vault_dir", "")).strip()
+
+    return (
+        f"{text}\n\n"
+        "[Workflow hint: The user is requesting a follow-up rewrite of the most recent Zotero/Obsidian review note. "
+        "Prefer `obsidian_rewrite_materials_review_note` instead of a free-form rewrite, and overwrite the same note by default unless the user explicitly asks for a separate copy. "
+        f"Latest review context: review_note_path={review_note_path!r}, topic={topic!r}, review_input_path={review_input_path!r}, "
+        f"review_draft_path={review_draft_path!r}, review_bundle_path={review_bundle_path!r}, effective_vault_dir={effective_vault_dir!r}. "
+        "Before the final write step, read these local skills in order: "
+        + ", ".join(f"/skills/{skill}/SKILL.md" for skill in _REQUIRED_REVIEW_SKILLS)
+        + ".]"
+    )
+
+
+def _round_has_pdf(round_files: List[Dict[str, Any]]) -> bool:
+    for file_info in round_files or []:
+        filename = str(file_info.get("filename") or "")
+        if filename.lower().endswith(".pdf"):
+            return True
+    return False
+
+
+def _message_requests_pdf(message: str) -> bool:
+    lowered = (message or "").lower()
+    if not lowered or "pdf" not in lowered:
+        return False
+
+    negative_patterns = [
+        r"(不需要|无需|不用|不必|不要)[^\n]{0,12}pdf",
+        r"pdf[^\n]{0,12}(路径|全文|抽取|分析)",
+    ]
+    if any(re.search(pattern, lowered) for pattern in negative_patterns):
+        return False
+
+    explicit_patterns = [
+        r"(生成|导出|输出|产出|保存|写出|制作|创建)[^\n]{0,16}pdf",
+        r"pdf[^\n]{0,16}(文件|报告|文档|输出|导出|版本)",
+        r"\b(generate|create|export|save|write|produce|output)\b[^\n]{0,24}\bpdf\b",
+        r"\bpdf\b[^\n]{0,24}\b(file|report|document|output|export|version)\b",
+        r"final_report\.pdf",
+        r"output_report\.pdf",
+    ]
+    return any(re.search(pattern, lowered) for pattern in explicit_patterns)
+
+
+def _infer_run_failure_reason(
+    *,
+    message: str,
+    explicit_error: Optional[str],
+    pending_tool_calls: Dict[str, str],
+    tool_error_messages: List[str],
+    assistant_reply_generated: bool,
+    round_files: List[Dict[str, Any]],
+) -> Optional[str]:
+    reasons: List[str] = []
+    seen: Set[str] = set()
+
+    def _add(reason: Optional[str]) -> None:
+        text = (reason or "").strip()
+        if not text or text in seen:
+            return
+        seen.add(text)
+        reasons.append(text)
+
+    _add(explicit_error)
+
+    if pending_tool_calls:
+        unresolved = ", ".join(sorted({name for name in pending_tool_calls.values() if name})) or f"{len(pending_tool_calls)} 个工具调用"
+        _add(f"任务在工具调用尚未完成时提前结束：{unresolved}")
+
+    if _message_requests_pdf(message) and not _round_has_pdf(round_files):
+        _add("用户要求生成 PDF，但本轮没有生成任何 PDF 文件")
+
+    if not assistant_reply_generated:
+        _add("任务提前结束，未生成最终答复")
+
+    if tool_error_messages and reasons:
+        _add(f"工具执行报错：{tool_error_messages[0]}")
+
+    if reasons:
+        return "；".join(reasons)
+    return None
 
 
 async def _generate_session_title(first_message: str) -> str:
@@ -632,6 +938,16 @@ def _map_science_stream_to_agent_event(evt: Dict[str, Any]) -> Optional[Dict[str
             result["args"] = tool_args
         return _wrap_event("tool", result)
 
+    if event_type in {"skill_required", "skill_read", "skill_missing"}:
+        return _wrap_event(event_type, {
+            "event_id": _new_event_id(),
+            "timestamp": ts,
+            "skill_name": str(data.get("skill_name") or ""),
+            "required_skills": data.get("required_skills") if isinstance(data.get("required_skills"), list) else [],
+            "read_skills": data.get("read_skills") if isinstance(data.get("read_skills"), list) else [],
+            "missing_required_skills": data.get("missing_required_skills") if isinstance(data.get("missing_required_skills"), list) else [],
+        })
+
     if event_type == "statistics":
         return _wrap_event("statistics", data)
 
@@ -698,6 +1014,7 @@ async def get_shared_session(session_id: str) -> ApiResponse:
             events=events,
             is_shared=True,
             mode=getattr(session, "mode", "deep"),
+            source=getattr(session, "source", None),
         ).model_dump())
     except ScienceSessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Shared session not found") from exc
@@ -713,6 +1030,8 @@ async def get_shared_session(session_id: str) -> ApiResponse:
 # ═══════════════════════════════════════════════════════════════════
 
 from backend.mongodb.db import db as _db
+from backend.tool_library_taxonomy import classify_external_tool
+from Tools import reload_external_tools
 
 _EXTERNAL_SKILLS_DIR = os.environ.get("EXTERNAL_SKILLS_DIR", "/app/Skills")
 _BUILTIN_SKILLS_DIR = os.environ.get("BUILTIN_SKILLS_DIR", "/app/builtin_skills")
@@ -733,6 +1052,10 @@ def _parse_skill_frontmatter(skill_dir: _Path) -> Dict[str, Any]:
             if isinstance(fm, dict):
                 result["name"] = fm.get("name", skill_dir.name)
                 result["description"] = fm.get("description", "")
+                for key, value in fm.items():
+                    if key in {"name", "description"}:
+                        continue
+                    result[key] = value
     except Exception:
         pass
     return result
@@ -759,6 +1082,12 @@ class SkillBlockRequest(BaseModel):
     blocked: bool = Field(default=True)
 
 
+class SkillInstallRequest(BaseModel):
+    source: str = Field(..., description="GitHub repo, skills.sh URL, or local path")
+    skill_name: str = Field(default="", description="Skill name when the source contains multiple skills")
+    overwrite: bool = Field(default=False, description="Whether to replace an existing skill with the same name")
+
+
 @router.get("/skills", response_model=ApiResponse)
 async def list_skills(current_user: User = Depends(require_user)) -> ApiResponse:
     """列出所有 skills（内置排前面，不可屏蔽/删除）+ 外置 skills。"""
@@ -782,6 +1111,30 @@ async def list_skills(current_user: User = Depends(require_user)) -> ApiResponse
         return ApiResponse(data=builtin + external)
     except Exception as exc:
         logger.exception("list_skills failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/skills/install", response_model=ApiResponse)
+async def install_skill(
+    body: SkillInstallRequest,
+    current_user: User = Depends(require_user),
+) -> ApiResponse:
+    """Install a third-party skill directly into the project's external Skills directory."""
+    _ = current_user
+    try:
+        payload = install_skill_into_directory(
+            external_skills_dir=_EXTERNAL_SKILLS_DIR,
+            source=body.source,
+            skill_name=body.skill_name,
+            overwrite=body.overwrite,
+        )
+        return ApiResponse(data=payload)
+    except SkillInstallerError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("install_skill failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
@@ -962,6 +1315,7 @@ async def read_skill_file(
 # ═══════════════════════════════════════════════════════════════════
 
 _TOOLS_DIR = os.environ.get("TOOLS_DIR", "/app/Tools")
+_DEFAULT_TOOL_CATEGORY = "Uncategorized"
 
 
 def _extract_tool_description(py_file: _Path) -> str:
@@ -976,21 +1330,241 @@ def _extract_tool_description(py_file: _Path) -> str:
     return ""
 
 
-def _list_external_tools() -> List[Dict[str, Any]]:
+def _default_tool_meta() -> Dict[str, Any]:
+    return {
+        "tool_name": "",
+        "description": "",
+        "category": _DEFAULT_TOOL_CATEGORY,
+        "subcategory": "",
+        "tags": [],
+        "library_target": "external",
+        "source_file": "",
+    }
+
+
+def _is_tool_decorator(node: ast.expr) -> bool:
+    if isinstance(node, ast.Name):
+        return node.id == "tool"
+    if isinstance(node, ast.Call):
+        return _is_tool_decorator(node.func)
+    if isinstance(node, ast.Attribute):
+        return node.attr == "tool"
+    return False
+
+
+def _extract_docstring_summary(docstring: str) -> str:
+    for line in docstring.splitlines():
+        summary = line.strip()
+        if summary:
+            return summary
+    return ""
+
+
+def _normalize_tool_meta(raw_meta: Any) -> Dict[str, Any]:
+    meta = _default_tool_meta()
+    if not isinstance(raw_meta, dict):
+        return meta
+
+    category = raw_meta.get("category")
+    if isinstance(category, str) and category.strip():
+        meta["category"] = category.strip()
+
+    subcategory = raw_meta.get("subcategory")
+    if isinstance(subcategory, str):
+        meta["subcategory"] = subcategory.strip()
+
+    tags = raw_meta.get("tags")
+    if isinstance(tags, (list, tuple, set)):
+        normalized_tags: List[str] = []
+        seen: Set[str] = set()
+        for tag in tags:
+            if not isinstance(tag, str):
+                continue
+            cleaned = tag.strip()
+            if cleaned and cleaned not in seen:
+                seen.add(cleaned)
+                normalized_tags.append(cleaned)
+        meta["tags"] = normalized_tags
+
+    library_target = raw_meta.get("library_target")
+    if isinstance(library_target, str) and library_target.strip().lower() in {"external", "science"}:
+        meta["library_target"] = library_target.strip().lower()
+
+    return meta
+
+
+def _parse_external_tool_file(py_file: _Path) -> Dict[str, Any]:
+    meta = _default_tool_meta()
+    meta["source_file"] = str(py_file)
+    try:
+        source = py_file.read_text(encoding="utf-8", errors="replace")
+        tree = ast.parse(source)
+    except Exception:
+        return meta
+
+    raw_meta: Any = None
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            if any(isinstance(target, ast.Name) and target.id == "__tool_meta__" for target in node.targets):
+                try:
+                    raw_meta = ast.literal_eval(node.value)
+                except (ValueError, SyntaxError):
+                    raw_meta = None
+                break
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == "__tool_meta__":
+            try:
+                raw_meta = ast.literal_eval(node.value) if node.value is not None else None
+            except (ValueError, SyntaxError):
+                raw_meta = None
+            break
+
+    meta.update(_normalize_tool_meta(raw_meta))
+
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(
+            _is_tool_decorator(decorator) for decorator in node.decorator_list
+        ):
+            meta["tool_name"] = node.name
+            meta["description"] = _extract_docstring_summary(ast.get_docstring(node) or "")
+            break
+
+    if not meta.get("tool_name"):
+        meta["tool_name"] = py_file.stem
+
+    return meta
+
+
+def _tool_schema_json(tool: Any) -> Dict[str, Any]:
+    schema_model = getattr(tool, "args_schema", None)
+    if schema_model is None:
+        return {"type": "object", "properties": {}, "required": []}
+    try:
+        if hasattr(schema_model, "model_json_schema"):
+            schema = schema_model.model_json_schema()
+        elif hasattr(schema_model, "schema"):
+            schema = schema_model.schema()
+        else:
+            schema = {}
+    except Exception:
+        schema = {}
+    if not isinstance(schema, dict):
+        schema = {}
+    schema.setdefault("type", "object")
+    schema.setdefault("properties", {})
+    schema.setdefault("required", [])
+    return schema
+
+
+def _external_proxy_map(force_reload: bool = False) -> Dict[str, Any]:
+    try:
+        proxies = reload_external_tools(force=force_reload)
+    except Exception as exc:
+        logger.warning("reload_external_tools failed: %s", exc)
+        return {}
+    return {str(getattr(tool, "name", "")).strip(): tool for tool in proxies if getattr(tool, "name", None)}
+
+
+def _serialize_external_tool(py_file: _Path, meta: Dict[str, Any], proxy: Any | None = None) -> Dict[str, Any]:
+    taxonomy = classify_external_tool(
+        name=py_file.stem,
+        raw_category=meta["category"],
+        raw_subcategory=meta["subcategory"],
+        tags=meta["tags"],
+        description=meta["description"],
+    )
+    return {
+        "name": py_file.stem,
+        "tool_name": meta.get("tool_name") or py_file.stem,
+        "description": meta["description"],
+        "file": py_file.name,
+        "source_file": str(py_file),
+        "category": meta["category"],
+        "subcategory": meta["subcategory"],
+        "tags": meta["tags"],
+        "parameters": _tool_schema_json(proxy) if proxy is not None else {"type": "object", "properties": {}, "required": []},
+        "examples": [],
+        "return_schema": None,
+        "runner": "structured_proxy" if proxy is not None else "metadata_only",
+        **taxonomy,
+    }
+
+
+def _get_external_tool_entry(tool_name: str, force_reload: bool = False) -> Dict[str, Any]:
+    cleaned_tool_name = (tool_name or "").strip()
+    if not cleaned_tool_name:
+        raise HTTPException(status_code=404, detail="Tool not found")
+
+    tool_path = _Path(_TOOLS_DIR) / f"{cleaned_tool_name}.py"
+    if not tool_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Tool '{cleaned_tool_name}' not found")
+
+    meta = _parse_external_tool_file(tool_path)
+    proxies = _external_proxy_map(force_reload=force_reload)
+    proxy = proxies.get(meta.get("tool_name") or cleaned_tool_name) or proxies.get(cleaned_tool_name)
+    if proxy is None:
+        raise HTTPException(status_code=503, detail=f"Tool '{cleaned_tool_name}' proxy is unavailable")
+
+    return {
+        "tool_path": tool_path,
+        "meta": meta,
+        "proxy": proxy,
+        "spec": _serialize_external_tool(tool_path, meta, proxy),
+    }
+
+
+def _validate_external_arguments(proxy: Any, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    payload = dict(arguments or {})
+    schema_model = getattr(proxy, "args_schema", None)
+    if schema_model is None:
+        return payload
+    validated = schema_model(**payload)
+    if hasattr(validated, "model_dump"):
+        return validated.model_dump()
+    if hasattr(validated, "dict"):
+        return validated.dict()
+    return payload
+
+
+def _normalize_external_result(raw_result: Any) -> Dict[str, Any]:
+    diagnostics: Dict[str, Any] = {}
+    result = raw_result
+
+    if isinstance(raw_result, dict) and "result" in raw_result:
+        result = raw_result.get("result")
+        sandbox_exec = raw_result.get("_sandbox_exec")
+        if isinstance(sandbox_exec, dict):
+            stdout = sandbox_exec.get("output")
+            if stdout:
+                diagnostics["stdout"] = stdout
+            diagnostics["runner"] = sandbox_exec
+
+    success = not (isinstance(result, dict) and result.get("error"))
+    normalized: Dict[str, Any] = {"success": success, "result": result}
+    if diagnostics:
+        normalized.update(diagnostics)
+    return normalized
+
+
+def _list_external_tools(force_reload: bool = False) -> List[Dict[str, Any]]:
     """列出 Tools 目录中所有外置工具（排除 __init__.py）。"""
     base = _Path(_TOOLS_DIR)
     if not base.is_dir():
         return []
+    proxies = _external_proxy_map(force_reload=force_reload)
     tools: List[Dict[str, Any]] = []
     for py_file in sorted(base.glob("*.py")):
         if py_file.name == "__init__.py":
             continue
-        tools.append({
-            "name": py_file.stem,
-            "description": _extract_tool_description(py_file),
-            "file": py_file.name,
-        })
+        meta = _parse_external_tool_file(py_file)
+        if meta.get("library_target") == "science":
+            continue
+        proxy = proxies.get(meta.get("tool_name") or py_file.stem) or proxies.get(py_file.stem)
+        tools.append(_serialize_external_tool(py_file, meta, proxy))
     return tools
+
+
+class ExternalToolRunRequest(BaseModel):
+    arguments: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ToolBlockRequest(BaseModel):
@@ -1015,6 +1589,54 @@ async def list_tools(current_user: User = Depends(require_user)) -> ApiResponse:
     except Exception as exc:
         logger.exception("list_tools failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/tools/{tool_name}/spec", response_model=ApiResponse)
+async def get_tool_spec(
+    tool_name: str,
+    current_user: User = Depends(require_user),
+) -> ApiResponse:
+    try:
+        entry = _get_external_tool_entry(tool_name)
+        blocked = await _db.get_collection("blocked_tools").find_one(
+            {"user_id": current_user.id, "tool_name": tool_name},
+            {"_id": 1},
+        )
+        spec = dict(entry["spec"])
+        spec["blocked"] = blocked is not None
+        return ApiResponse(data=spec)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("get_tool_spec failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/tools/{tool_name}/run", response_model=ApiResponse)
+async def run_tool(
+    tool_name: str,
+    body: ExternalToolRunRequest,
+    _current_user: User = Depends(require_user),
+) -> ApiResponse:
+    try:
+        entry = _get_external_tool_entry(tool_name, force_reload=True)
+        proxy = entry["proxy"]
+        arguments = _validate_external_arguments(proxy, body.arguments)
+
+        runner = getattr(proxy, "coroutine", None) or getattr(proxy, "func", None)
+        if runner is None:
+            raise RuntimeError(f"Tool '{tool_name}' is missing an executable runner")
+
+        result = runner(**arguments)
+        if inspect.isawaitable(result):
+            result = await result
+
+        return ApiResponse(data=_normalize_external_result(result))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("run_tool failed for %s: %s", tool_name, exc)
+        return ApiResponse(data={"success": False, "result": {"error": str(exc)}})
 
 
 @router.put("/tools/{tool_name}/block", response_model=ApiResponse)
@@ -1253,6 +1875,7 @@ async def get_session(session_id: str, current_user: User = Depends(require_user
             is_shared=getattr(session, "is_shared", False),
             mode=getattr(session, "mode", "deep"),
             model_config_id=mc_id,
+            source=getattr(session, "source", None),
         ).model_dump())
     except ScienceSessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1473,6 +2096,7 @@ async def _agent_background_worker(
     session: Any,
     session_id: str,
     message: str,
+    agent_query: Optional[str],
     attachments: List[str],
     event_id: Optional[str] = None,
     timestamp: Optional[int] = None,
@@ -1511,6 +2135,11 @@ async def _agent_background_worker(
 
     statistics: Dict[str, Any] = {}
     _chunk_buffer: list[str] = []
+    assistant_reply_generated = False
+    pending_tool_calls: Dict[str, str] = {}
+    tool_error_messages: List[str] = []
+    failure_reason: Optional[str] = None
+    error_event_persisted = False
 
     def _emit(evt_name: str, data_json: str) -> None:
         _emit_to_sse(session_id, {"event": evt_name, "data": data_json})
@@ -1540,13 +2169,14 @@ async def _agent_background_worker(
 
     try:
         async for evt in arun_science_task_stream(
-            session=session, query=message or "", attachments=user_attachments,
+            session=session, query=agent_query if agent_query is not None else (message or ""), attachments=user_attachments,
             language=language,
         ):
             if session.is_cancelled():
+                failure_reason = "Session stopped by user"
                 _emit("error", _json_dumps({
                     "event_id": _new_event_id(), "timestamp": _now_ts(),
-                    "error": "Session stopped by user",
+                    "error": failure_reason,
                 }))
                 return
 
@@ -1573,10 +2203,31 @@ async def _agent_background_worker(
                         "content": full_content, "role": "assistant", "attachments": [],
                     })
                     _append_session_event(session, persist_event)
+                    assistant_reply_generated = True
                     await session.save()
                     _chunk_buffer.clear()
                 _emit(evt_name, _json_dumps(mapped["data"]))
                 continue
+
+            evt_data = mapped.get("data") or {}
+            if evt_name == "message" and evt_data.get("role") == "assistant":
+                assistant_reply_generated = True
+            elif evt_name == "tool":
+                tool_call_id = str(evt_data.get("tool_call_id") or "")
+                tool_function = str(evt_data.get("function") or evt_data.get("name") or "tool")
+                tool_status = str(evt_data.get("status") or "")
+                if tool_status == "calling" and tool_call_id:
+                    pending_tool_calls[tool_call_id] = tool_function
+                elif tool_status == "called":
+                    pending_tool_calls.pop(tool_call_id, None)
+                    tool_error = _extract_tool_error_message(evt_data.get("content"))
+                    if tool_error:
+                        tool_error_messages.append(tool_error)
+            elif evt_name == "error":
+                error_text = str(evt_data.get("error") or "").strip()
+                if error_text and not failure_reason:
+                    failure_reason = error_text
+                error_event_persisted = True
 
             _append_session_event(session, mapped)
             if evt_name in ["message", "tool", "step", "plan"]:
@@ -1585,6 +2236,8 @@ async def _agent_background_worker(
 
     except Exception as exc:
         logger.exception(f"[AgentWorker] session={session_id} failed")
+        failure_reason = str(exc)
+        error_event_persisted = True
         error_event = _wrap_event("error", {
             "event_id": _new_event_id(), "timestamp": _now_ts(), "error": str(exc),
         })
@@ -1599,9 +2252,8 @@ async def _agent_background_worker(
                 "content": full_content, "role": "assistant", "attachments": [],
             })
             _append_session_event(session, persist_event)
+            assistant_reply_generated = True
             _chunk_buffer.clear()
-
-        setattr(session, "status", SessionStatus.COMPLETED)
 
         # Auto-detect skills
         try:
@@ -1659,11 +2311,33 @@ async def _agent_background_worker(
         except Exception:
             logger.debug("round_files diff failed", exc_info=True)
 
+        failure_reason = _infer_run_failure_reason(
+            message=message or "",
+            explicit_error=failure_reason,
+            pending_tool_calls=pending_tool_calls,
+            tool_error_messages=tool_error_messages,
+            assistant_reply_generated=assistant_reply_generated,
+            round_files=round_files,
+        )
+        run_failed = bool(failure_reason)
+        setattr(session, "status", SessionStatus.FAILED if run_failed else SessionStatus.COMPLETED)
+
+        if run_failed and not error_event_persisted:
+            error_event = _wrap_event("error", {
+                "event_id": _new_event_id(),
+                "timestamp": _now_ts(),
+                "error": failure_reason,
+            })
+            _append_session_event(session, error_event)
+            _emit(error_event["event"], _json_dumps(error_event["data"]))
+
         done_event = _wrap_event("done", {
             "event_id": _new_event_id(),
             "timestamp": _now_ts(),
             "statistics": statistics,
             "round_files": round_files,
+            "status": SessionStatus.FAILED if run_failed else SessionStatus.COMPLETED,
+            "error": failure_reason if run_failed else None,
         })
         _append_session_event(session, done_event)
         await session.save()
@@ -1679,7 +2353,10 @@ async def _agent_background_worker(
 
         _agent_tasks.pop(session_id, None)
         _agent_queues.pop(session_id, None)
-        logger.info(f"[AgentWorker] session={session_id} completed")
+        logger.info(
+            f"[AgentWorker] session={session_id} "
+            f"{'failed' if run_failed else 'completed'}"
+        )
 
 
 @router.post("/{session_id}/chat")
@@ -1712,6 +2389,38 @@ async def chat_with_session(
 
     existing_task = _agent_tasks.get(session_id)
     is_reconnect = existing_task is not None and not existing_task.done()
+    is_external_session = getattr(session, "source", None) == "im"
+
+    if is_external_session and not body.message and not is_reconnect:
+        logger.info(f"[Chat] Restoring external IM session {session_id} via persisted events")
+
+        async def _external_event_generator():
+            initial_events = list(getattr(session, "events", []) or [])
+            replay_events = _events_after_cursor(initial_events, body.event_id)
+            last_seen_count = len(initial_events)
+            for evt in replay_events:
+                yield {"event": evt["event"], "data": _json_dumps(evt.get("data", {}))}
+
+            idle_loops = 0
+            while True:
+                if await request.is_disconnected():
+                    break
+                latest_session = await async_get_science_session(session_id)
+                latest_events = list(getattr(latest_session, "events", []) or [])
+                while last_seen_count < len(latest_events):
+                    evt = latest_events[last_seen_count]
+                    last_seen_count += 1
+                    yield {"event": evt["event"], "data": _json_dumps(evt.get("data", {}))}
+                    idle_loops = 0
+                latest_status = getattr(latest_session, "status", SessionStatus.PENDING)
+                if latest_status not in (SessionStatus.RUNNING, SessionStatus.PENDING):
+                    break
+                idle_loops += 1
+                if idle_loops >= 1200:
+                    break
+                await _asyncio.sleep(0.5)
+
+        return EventSourceResponse(_external_event_generator())
 
     # Orphan detection: session DB says RUNNING but no live agent task exists
     # (happens after a server restart). Don't start a phantom agent — just
@@ -1722,6 +2431,7 @@ async def chat_with_session(
         not is_reconnect
         and session.status == SessionStatus.RUNNING
         and not body.message
+        and not is_external_session
     )
     if is_orphan:
         session.status = SessionStatus.COMPLETED
@@ -1748,7 +2458,15 @@ async def chat_with_session(
         task = _asyncio.create_task(
             _agent_background_worker(
                 session, session_id,
-                body.message or "", body.attachments or [],
+                body.message or "",
+                _augment_agent_query_for_review_rewrite(
+                    _augment_agent_query_for_overwrite_confirmation(
+                        body.message or "",
+                        list(getattr(session, "events", []) or []),
+                    ),
+                    session,
+                ),
+                body.attachments or [],
                 event_id=body.event_id, timestamp=body.timestamp,
                 language=body.language,
             )
@@ -1764,14 +2482,8 @@ async def chat_with_session(
         try:
             # On reconnection: replay events the client missed (between getSession and now)
             if client_cursor:
-                found_cursor = False
-                for evt in list(session.events):
-                    evt_data = evt.get("data", {})
-                    if not found_cursor:
-                        if evt_data.get("event_id") == client_cursor:
-                            found_cursor = True
-                        continue
-                    yield {"event": evt["event"], "data": _json_dumps(evt_data)}
+                for evt in _events_after_cursor(list(session.events), client_cursor):
+                    yield {"event": evt["event"], "data": _json_dumps(evt.get("data", {}))}
 
             # Stream live events from the background worker
             while True:

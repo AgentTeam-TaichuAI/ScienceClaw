@@ -12,6 +12,7 @@ SSE 监控中间件 — 基于 sample/monitoring_v2.py 的模式。
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 import uuid
@@ -21,6 +22,13 @@ from loguru import logger
 from langchain.agents.middleware import AgentMiddleware
 
 from backend.deepagent.sse_protocol import get_protocol_manager
+
+
+_SKILL_READ_TOOL_NAMES = {"read_file", "sandbox_read_file", "file_read"}
+_REVIEW_GATED_TOOL_NAMES = {"obsidian_rewrite_materials_review_note"}
+_SKILL_PATH_RE = re.compile(
+    r"(?i)(?:^|[\\/])(?:skills|builtin-skills|builtin_skills|Skills)(?:[\\/])([^\\/]+)[\\/]SKILL\.md$"
+)
 
 
 # ───────────────────────────────────────────────────────────────────
@@ -97,6 +105,9 @@ class SSEMonitoringMiddleware(AgentMiddleware):
         self.output_tokens: int = 0
 
         # 协议管理器（获取工具元数据）
+        self.required_skills: List[str] = []
+        self.read_skills: List[str] = []
+        self._read_skill_set: set[str] = set()
         self._protocol = get_protocol_manager()
 
     # ── 路径标识 ──
@@ -106,6 +117,102 @@ class SSEMonitoringMiddleware(AgentMiddleware):
             return f"{self.parent_agent} -> {self.agent_name}"
         return self.agent_name
 
+    def _push_event(self, event: str, data: Dict[str, Any]) -> None:
+        with self._events_lock:
+            self.sse_events.append(MiddlewareEvent(event=event, data=data))
+
+    def set_required_skills(self, skills: List[str]) -> None:
+        ordered = [str(skill).strip() for skill in skills if str(skill).strip()]
+        deduped: List[str] = []
+        seen: set[str] = set()
+        for skill in ordered:
+            if skill in seen:
+                continue
+            seen.add(skill)
+            deduped.append(skill)
+        self.required_skills = deduped
+        for skill in self.required_skills:
+            self._push_event(
+                "middleware_skill_required",
+                {
+                    "skill_name": skill,
+                    "required_skills": list(self.required_skills),
+                    "timestamp": time.time(),
+                },
+            )
+
+    def get_skill_state(self) -> Dict[str, List[str]]:
+        missing = [skill for skill in self.required_skills if skill not in self._read_skill_set]
+        return {
+            "required_skills": list(self.required_skills),
+            "read_skills": list(self.read_skills),
+            "missing_required_skills": missing,
+        }
+
+    def _extract_skill_name(self, tool_name: str, tool_args: Optional[Dict[str, Any]]) -> Optional[str]:
+        if tool_name not in _SKILL_READ_TOOL_NAMES or not isinstance(tool_args, dict):
+            return None
+        for key in ("file", "file_path", "path"):
+            raw_path = tool_args.get(key)
+            if not isinstance(raw_path, str) or not raw_path.strip():
+                continue
+            match = _SKILL_PATH_RE.search(raw_path.strip())
+            if match:
+                return match.group(1)
+        return None
+
+    def _record_skill_read(self, skill_name: str) -> None:
+        if not skill_name or skill_name in self._read_skill_set:
+            return
+        self._read_skill_set.add(skill_name)
+        self.read_skills.append(skill_name)
+        state = self.get_skill_state()
+        self._push_event(
+            "middleware_skill_read",
+            {
+                "skill_name": skill_name,
+                **state,
+                "timestamp": time.time(),
+            },
+        )
+
+    def _guard_required_skills(self, tool_name: str, tool_args: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not self.required_skills:
+            return None
+
+        should_guard = False
+        if tool_name in _REVIEW_GATED_TOOL_NAMES:
+            should_guard = True
+        elif tool_name == "obsidian_write_materials_note":
+            note_type = str((tool_args or {}).get("note_type", "")).strip().lower()
+            should_guard = note_type == "review"
+
+        if not should_guard:
+            return None
+
+        state = self.get_skill_state()
+        if not state["missing_required_skills"]:
+            return None
+
+        for skill in state["missing_required_skills"]:
+            self._push_event(
+                "middleware_skill_missing",
+                {
+                    "skill_name": skill,
+                    **state,
+                    "timestamp": time.time(),
+                },
+            )
+
+        return {
+            "ok": False,
+            "error": (
+                "Required local skills were not read before the review write step: "
+                + ", ".join(state["missing_required_skills"])
+            ),
+            **state,
+        }
+
     # ── 核心：拦截工具调用前后 ──
 
     def _before_tool(self, request: Any):
@@ -113,6 +220,9 @@ class SSEMonitoringMiddleware(AgentMiddleware):
         tool_name, tool_args, tool_call_id = self._extract_tool_info(request)
         start_time = time.time()
         tool_meta = self._protocol.get_tool_meta(tool_name or "unknown")
+        skill_name = self._extract_skill_name(tool_name or "", tool_args)
+        if skill_name:
+            self._record_skill_read(skill_name)
 
         if tool_name:
             self.total_tool_calls += 1
@@ -148,6 +258,11 @@ class SSEMonitoringMiddleware(AgentMiddleware):
         """工具执行后：计算耗时、生成 complete 事件、处理 todolist"""
         duration_ms = int((time.time() - start_time) * 1000)
         self.total_tool_duration_ms += duration_ms
+        if isinstance(result, dict) and tool_name and tool_name.startswith("obsidian_"):
+            state = self.get_skill_state()
+            result.setdefault("required_skills", state["required_skills"])
+            result.setdefault("read_skills", state["read_skills"])
+            result.setdefault("missing_required_skills", state["missing_required_skills"])
 
         if tool_name:
             result_summary = self._extract_result_summary(result)
@@ -189,7 +304,8 @@ class SSEMonitoringMiddleware(AgentMiddleware):
     ) -> Any:
         """同步版本 — 拦截工具执行前后（供 invoke/stream 调用）"""
         tool_name, tool_args, tool_call_id, start_time, tool_meta = self._before_tool(request)
-        result = handler(request)
+        guarded_result = self._guard_required_skills(tool_name or "", tool_args)
+        result = guarded_result if guarded_result is not None else handler(request)
         return self._after_tool(result, tool_name, tool_args, tool_call_id, start_time, tool_meta)
 
     async def awrap_tool_call(
@@ -199,7 +315,8 @@ class SSEMonitoringMiddleware(AgentMiddleware):
     ) -> Any:
         """异步版本 — 拦截工具执行前后（供 ainvoke/astream 调用）"""
         tool_name, tool_args, tool_call_id, start_time, tool_meta = self._before_tool(request)
-        result = await handler(request)
+        guarded_result = self._guard_required_skills(tool_name or "", tool_args)
+        result = guarded_result if guarded_result is not None else await handler(request)
         return self._after_tool(result, tool_name, tool_args, tool_call_id, start_time, tool_meta)
 
     # ── 辅助方法 ──
@@ -373,6 +490,9 @@ class SSEMonitoringMiddleware(AgentMiddleware):
         self.total_tool_duration_ms = 0
         self.input_tokens = 0
         self.output_tokens = 0
+        self.required_skills = []
+        self.read_skills = []
+        self._read_skill_set.clear()
 
     def add_tokens(self, input_tokens: int = 0, output_tokens: int = 0):
         """累积 token 使用量"""

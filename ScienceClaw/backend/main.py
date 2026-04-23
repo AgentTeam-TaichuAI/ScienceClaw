@@ -17,12 +17,14 @@ from backend.route.sessions import router as sessions_router, cleanup_orphaned_s
 from backend.route.file import router as file_router
 from backend.route.models import router as models_router
 from backend.route.tooluniverse import router as tooluniverse_router
+from backend.route.tool_library import router as tool_library_router
 from backend.route.task_settings import router as task_settings_router
 from backend.route.memory import router as memory_router
 from backend.route.science import router as science_router
 from backend.route.chat import router as chat_router
 from backend.route.statistics import router as statistics_router
 from backend.route.im import router as im_router, start_im_runtime, stop_im_runtime
+from backend.route.desktop import router as desktop_router
 from backend.models import init_system_models
 from backend.user.bootstrap import ensure_admin_user
 from backend.im.migrations import backfill_session_sources
@@ -50,7 +52,7 @@ async def lifespan(app: FastAPI):
     try:
         await start_im_runtime()
     except Exception as e:
-        logger.error(f"Failed to start lark long connection: {e}")
+        logger.error(f"Failed to start IM runtime: {e}")
     yield
     try:
         await graceful_shutdown_agents()
@@ -59,7 +61,7 @@ async def lifespan(app: FastAPI):
     try:
         await stop_im_runtime()
     except Exception as e:
-        logger.error(f"Failed to stop lark long connection: {e}")
+        logger.error(f"Failed to stop IM runtime: {e}")
     await db.close()
 
 
@@ -103,12 +105,14 @@ def create_app() -> FastAPI:
     app.include_router(file_router, prefix="/api/v1")
     app.include_router(models_router, prefix="/api/v1")
     app.include_router(tooluniverse_router, prefix="/api/v1")
+    app.include_router(tool_library_router, prefix="/api/v1")
     app.include_router(task_settings_router, prefix="/api/v1")
     app.include_router(memory_router, prefix="/api/v1")
     app.include_router(science_router, prefix="/api/v1")
     app.include_router(chat_router, prefix="/api/v1")
     app.include_router(statistics_router, prefix="/api/v1")
     app.include_router(im_router, prefix="/api/v1")
+    app.include_router(desktop_router, prefix="/api/v1")
 
     logger.info("FastAPI initialized with /api/v1 endpoints")
     return app

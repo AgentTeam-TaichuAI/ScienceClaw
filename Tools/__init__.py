@@ -14,6 +14,7 @@ import logging
 import os
 import shlex
 import threading
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -28,7 +29,7 @@ _package_dir = str(Path(__file__).resolve().parent)
 _lock = threading.Lock()
 _cached_tools: list[StructuredTool] = []
 
-_SANDBOX_REST_URL = os.environ.get("SANDBOX_REST_URL", "http://sandbox:8080")
+_SANDBOX_REST_URL = os.environ.get("SANDBOX_REST_URL", "http://localhost:18080").rstrip("/")
 _TOOL_RUNNER_PATH = "/app/_tool_runner.py"
 _TOOLS_DIR_IN_SANDBOX = "/app/Tools"
 _EXECUTE_TIMEOUT = 120
@@ -37,49 +38,50 @@ _START_MARKER = ">>>TOOL_RESULT_JSON>>>"
 _END_MARKER = "<<<TOOL_RESULT_JSON<<<"
 
 
-# ── Sandbox session management (lazy, single session reused across calls) ──
+# ── Sandbox session management (fresh session per proxy call) ──
 
-_session_lock = threading.Lock()
-_sandbox_session_id: Optional[str] = None
+def _create_sandbox_session(exec_dir: str = "/") -> str:
+    resp = httpx.post(
+        f"{_SANDBOX_REST_URL}/v1/shell/sessions/create",
+        json={"exec_dir": exec_dir},
+        timeout=10,
+        trust_env=False,
+    )
+    resp.raise_for_status()
+    session_id = resp.json()["data"]["session_id"]
+    logger.info(f"[Tools] Sandbox tool-exec session: {session_id}")
+    return session_id
 
 
-def _ensure_sandbox_session() -> str:
-    global _sandbox_session_id
-    if _sandbox_session_id:
-        return _sandbox_session_id
-    with _session_lock:
-        if _sandbox_session_id:
-            return _sandbox_session_id
-        resp = httpx.post(
-            f"{_SANDBOX_REST_URL}/v1/shell/sessions/create",
-            json={"exec_dir": "/"},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        _sandbox_session_id = resp.json()["data"]["session_id"]
-        logger.info(f"[Tools] Sandbox tool-exec session: {_sandbox_session_id}")
-        return _sandbox_session_id
+def _write_sandbox_file(file_path: str, content: str) -> None:
+    resp = httpx.post(
+        f"{_SANDBOX_REST_URL}/v1/file/write",
+        json={"file": file_path, "content": content},
+        timeout=15,
+        trust_env=False,
+    )
+    resp.raise_for_status()
 
 
 def _execute_in_sandbox(command: str, timeout: int = _EXECUTE_TIMEOUT) -> str:
-    """Execute a shell command in the sandbox, return stdout."""
-    global _sandbox_session_id
+    """Execute a shell command in the sandbox, return stdout for this call only."""
 
-    def _do_exec(sid: str) -> str:
+    def _do_exec() -> str:
+        sid = _create_sandbox_session()
         resp = httpx.post(
             f"{_SANDBOX_REST_URL}/v1/shell/exec",
             json={"id": sid, "command": command, "async_mode": False},
             timeout=timeout + 5,
+            trust_env=False,
         )
         resp.raise_for_status()
         return resp.json().get("data", {}).get("output", "")
 
     try:
-        return _do_exec(_ensure_sandbox_session())
+        return _do_exec()
     except Exception as exc:
-        logger.warning(f"[Tools] Sandbox exec failed ({exc}), retrying with new session")
-        _sandbox_session_id = None
-        return _do_exec(_ensure_sandbox_session())
+        logger.warning(f"[Tools] Sandbox exec failed ({exc}), retrying with fresh session")
+        return _do_exec()
 
 
 # ── AST helpers ──
@@ -199,7 +201,20 @@ def _create_proxy_tool(meta: Dict[str, Any]) -> StructuredTool:
     def _make_proxy(fn: str, path: str):
         def _proxy_run(**kwargs: Any) -> Any:
             args_json = json.dumps(kwargs, ensure_ascii=False, default=str)
-            cmd = f"python3 {_TOOL_RUNNER_PATH} {path} {fn} {shlex.quote(args_json)}"
+            args_path = f"/tmp/scienceclaw_tool_args_{uuid.uuid4().hex}.json"
+            try:
+                _write_sandbox_file(args_path, args_json)
+            except Exception as exc:
+                logger.error(f"[Tools] Sandbox file write failed for {fn}: {exc}")
+                return {
+                    "_sandbox_exec": {"command": "", "output": str(exc)},
+                    "result": {"error": f"Sandbox file write failed: {exc}"},
+                }
+
+            cmd = (
+                f"python3 {shlex.quote(_TOOL_RUNNER_PATH)} "
+                f"{shlex.quote(path)} {shlex.quote(fn)} --args-file {shlex.quote(args_path)}"
+            )
             logger.info(f"[Tools] Proxy → sandbox: {fn}")
             try:
                 raw_output = _execute_in_sandbox(cmd)
@@ -210,9 +225,9 @@ def _create_proxy_tool(meta: Dict[str, Any]) -> StructuredTool:
                     "result": {"error": f"Sandbox execution failed: {exc}"},
                 }
 
-            start = raw_output.find(_START_MARKER)
-            end = raw_output.find(_END_MARKER)
-            if start == -1 or end == -1:
+            start = raw_output.rfind(_START_MARKER)
+            end = raw_output.rfind(_END_MARKER)
+            if start == -1 or end == -1 or end < start:
                 logger.error(f"[Tools] Result markers missing for {fn}")
                 return {
                     "_sandbox_exec": {"command": cmd, "output": raw_output[-2000:]},

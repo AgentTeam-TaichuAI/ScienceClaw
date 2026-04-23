@@ -56,7 +56,7 @@
 
             <!-- Markdown preview -->
             <div v-else-if="previewType === 'markdown'" class="p-6">
-              <div class="prose prose-slate max-w-none dark:prose-invert text-sm" v-html="renderedMarkdown"></div>
+              <div class="markdown-preview-content text-sm" v-html="renderedMarkdown"></div>
             </div>
 
             <!-- Text preview -->

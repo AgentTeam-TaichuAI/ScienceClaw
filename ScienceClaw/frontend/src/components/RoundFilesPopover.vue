@@ -12,6 +12,7 @@
           v-for="file in outputFiles"
           :key="file.file_id"
           class="file-card group flex items-center gap-3 p-3 rounded-xl transition-all duration-200 hover:bg-gray-50/80 dark:hover:bg-white/5"
+          @click="onFileClick(file)"
         >
           <div
             class="size-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm"
@@ -62,6 +63,7 @@
             v-for="file in processFiles"
             :key="file.file_id"
             class="file-card group flex items-center gap-3 p-3 rounded-xl transition-all duration-200 hover:bg-gray-50/80 dark:hover:bg-white/5"
+            @click="onFileClick(file)"
           >
             <div class="size-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400">
               <component :is="getFileType(file.filename).icon" class="size-5" />

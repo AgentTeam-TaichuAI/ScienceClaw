@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 import uuid
 import time
+from urllib.parse import urlparse
 from loguru import logger
 
 from backend.mongodb.db import db
@@ -49,6 +50,54 @@ class UpdateModelRequest(BaseModel):
     )
     is_active: Optional[bool] = None
 
+
+def _infer_system_provider(base_url: Optional[str], model_name: str) -> str:
+    base = (base_url or "").strip().lower()
+    model = (model_name or "").strip().lower()
+    host = ""
+    if base:
+        try:
+            host = urlparse(base).netloc.lower()
+        except Exception:
+            host = ""
+
+    if "deepseek" in host or model.startswith("deepseek"):
+        return "deepseek"
+    if "openai" in host or model.startswith(("gpt-", "chatgpt-", "o1", "o3", "o4", "text-embedding-", "whisper-", "dall-e")):
+        return "openai"
+    if "anthropic" in host or model.startswith("claude"):
+        return "anthropic"
+    if "google" in host or "generativelanguage" in base or model.startswith("gemini"):
+        return "google"
+    if "dashscope" in host or "aliyuncs" in host or model.startswith(("qwen", "qwq")):
+        return "qwen"
+    if "taichu" in host or "taichu" in model:
+        return "taichu"
+    if "meta" in host or model.startswith(("llama", "meta-llama")):
+        return "meta"
+    return "other"
+
+
+def _system_provider_label(provider: str) -> str:
+    return {
+        "openai": "OpenAI",
+        "anthropic": "Anthropic",
+        "deepseek": "DeepSeek",
+        "google": "Google",
+        "meta": "Meta",
+        "qwen": "Qwen",
+        "taichu": "Taichu",
+        "other": "OpenAI-Compatible",
+    }.get(provider, provider.capitalize())
+
+
+def _build_system_model_name(provider: str, model_name: str) -> str:
+    clean_model_name = (model_name or "").strip()
+    label = _system_provider_label(provider)
+    if not clean_model_name:
+        return label
+    return f"{label} {clean_model_name}"
+
 async def init_system_models():
     """
     Initialize system models from environment variables or settings.
@@ -64,11 +113,15 @@ async def init_system_models():
         logger.info("DS_API_KEY not set, skipping system model creation")
         return
 
+    inferred_provider = _infer_system_provider(
+        settings.model_ds_base_url,
+        settings.model_ds_name,
+    )
     system_definitions = [
         {
             "_id": "system-default",
-            "name": "DeepSeek V3.2",
-            "provider": "deepseek",
+            "name": _build_system_model_name(inferred_provider, settings.model_ds_name),
+            "provider": inferred_provider,
             "base_url": settings.model_ds_base_url,
             "api_key": settings.model_ds_api_key,
             "model_name": settings.model_ds_name,

@@ -1,4 +1,4 @@
-# BuildKit 用于 Dockerfile 中 apt/pip/npm 构建缓存，建议先执行: export DOCKER_BUILDKIT=1
+# BuildKit is recommended for apt/pip/npm layer caching.
 services:
   sandbox:
     build:
@@ -14,11 +14,18 @@ services:
     environment:
       TZ: Asia/Shanghai
       WEBSEARCH_URL: http://websearch:8068
+      OBSIDIAN_VAULT_DIR: /home/scienceclaw/obsidian_vault
+      OBSIDIAN_HOST_BRIDGE_URL: ${OBSIDIAN_HOST_BRIDGE_URL:-http://host.docker.internal:8765}
+      OBSIDIAN_HOST_BRIDGE_TOKEN: ${OBSIDIAN_HOST_BRIDGE_TOKEN:-scienceclaw-local-bridge}
     volumes:
       - ./Skills:/skills:ro
       - ./Tools:/app/Tools:ro
+      - ./ScienceClaw/backend:/app/backend:ro
       - ./ScienceClaw/backend/builtin_skills:/builtin-skills:ro
       - ./workspace:/home/scienceclaw
+      - type: bind
+        source: ${OBSIDIAN_VAULT_HOST_PATH:-./workspace/obsidian_vault}
+        target: /home/scienceclaw/obsidian_vault
     ports:
       - "18080:8080"
     restart: unless-stopped
@@ -43,7 +50,6 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
 
-  # ── SearXNG 搜索引擎（websearch 服务的依赖） ──
   searxng:
     image: searxng/searxng:latest
     environment:
@@ -56,7 +62,6 @@ services:
       - "26080:8080"
     restart: unless-stopped
 
-  # ── 网页搜索 + 爬取服务（替代 Tavily） ──
   websearch:
     build:
       context: ./ScienceClaw/websearch
@@ -79,15 +84,18 @@ services:
   backend:
     build:
       context: ./ScienceClaw/backend
-      additional_contexts:
-        websearch: ./ScienceClaw/websearch
     image: scienceclaw-backend:local
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./ScienceClaw/backend:/app/backend
       - ./ScienceClaw/backend/builtin_skills:/app/builtin_skills:ro
       - ./Tools:/app/Tools
       - ./Skills:/app/Skills
       - ./workspace:/home/scienceclaw
+      - type: bind
+        source: ${OBSIDIAN_VAULT_HOST_PATH:-./workspace/obsidian_vault}
+        target: /home/scienceclaw/obsidian_vault
     environment:
       SANDBOX_REST_URL: http://sandbox:8080
       WORKSPACE_DIR: /home/scienceclaw
@@ -112,10 +120,11 @@ services:
       MONGODB_PASSWORD: Yp51Bi1eEjC77sAt
       TASK_SERVICE_API_KEY: ${TASK_SERVICE_API_KEY:-}
       WEBSEARCH_API_KEY: "fdsfkjikmii"
-      # 网页搜索服务地址（Docker 内部通信）
       WEBSEARCH_BASE_URL: http://websearch:8068
       WEBSEARCH_URL: http://websearch:8068
-      # 诊断模式：记录每步 LLM 调用的完整上下文，用于质量分析（设为空或删除此行关闭）
+      OBSIDIAN_VAULT_DIR: /home/scienceclaw/obsidian_vault
+      OBSIDIAN_HOST_BRIDGE_URL: ${OBSIDIAN_HOST_BRIDGE_URL:-http://host.docker.internal:8765}
+      OBSIDIAN_HOST_BRIDGE_TOKEN: ${OBSIDIAN_HOST_BRIDGE_TOKEN:-scienceclaw-local-bridge}
       DIAGNOSTIC_MODE: "1"
       IM_ENABLED: "true"
       IM_RESPONSE_TIMEOUT: 300
@@ -123,10 +132,19 @@ services:
       LARK_ENABLED: "true"
       LARK_APP_ID: ${LARK_APP_ID-}
       LARK_APP_SECRET: ${LARK_APP_SECRET-}
+      TELEGRAM_ENABLED: ${TELEGRAM_ENABLED-false}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN-}
+      TELEGRAM_INGRESS_MODE: ${TELEGRAM_INGRESS_MODE-polling}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET-}
+      TELEGRAM_PUBLIC_BASE_URL: ${TELEGRAM_PUBLIC_BASE_URL-}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL-}
     ports:
       - "12001:8000"
     command: >
-      python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/backend
+      python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+      --reload-dir /app/backend
+      --reload-dir /app/Tools
+      --reload-dir /app/Skills
     restart: unless-stopped
     depends_on:
       sandbox:
@@ -141,12 +159,13 @@ services:
       timeout: 5s
       retries: 30
 
-  # ── 任务调度服务（Task Service）──
   scheduler_api:
     build:
-      context: ScienceClaw/task-service
+      context: ./ScienceClaw/task-service
       dockerfile: Dockerfile
     image: scienceclaw-task-service:local
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       TZ: Asia/Shanghai
       DISPLAY_TIMEZONE: ${DISPLAY_TIMEZONE:-Asia/Shanghai}
@@ -176,6 +195,8 @@ services:
   celery_worker:
     image: scienceclaw-task-service:local
     pull_policy: never
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       TZ: Asia/Shanghai
       MONGODB_HOST: mongo
@@ -199,6 +220,8 @@ services:
   celery_beat:
     image: scienceclaw-task-service:local
     pull_policy: never
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       TZ: Asia/Shanghai
       MONGODB_HOST: mongo
@@ -220,9 +243,7 @@ services:
     working_dir: /app
     environment:
       BACKEND_URL: http://backend:8000
-      # 定时任务服务：Vite 代理 /task-service 时转发到该地址（容器内使用服务名）
       TASK_SERVICE_URL: http://scheduler_api:8001
-      # 任务执行时间展示时区，默认北京时间（与 DISPLAY_TIMEZONE 一致）
       VITE_DISPLAY_TIMEZONE: ${DISPLAY_TIMEZONE:-Asia/Shanghai}
       NPM_CONFIG_REGISTRY: https://registry.npmmirror.com
       NPM_CONFIG_CACHE: /npm-cache
@@ -236,7 +257,7 @@ services:
     ports:
       - "5173:5173"
     command: >
-      sh -lc "npm install --no-fund --no-audit && npm run dev -- --host 0.0.0.0 --port 5173"
+      sh -lc "npm ci --no-fund --no-audit && npm run dev -- --host 0.0.0.0 --port 5173"
     restart: unless-stopped
     depends_on:
       backend:
@@ -244,7 +265,32 @@ services:
       scheduler_api:
         condition: service_started
 
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      CADDY_SITE_ADDRESS: ${CADDY_SITE_ADDRESS:-:80}
+      BACKEND_UPSTREAM: backend:8000
+      TASK_SERVICE_UPSTREAM: scheduler_api:8001
+      FRONTEND_UPSTREAM: frontend:5173
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - scienceclaw_caddy_data:/data
+      - scienceclaw_caddy_config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+      scheduler_api:
+        condition: service_started
+      frontend:
+        condition: service_started
+
 volumes:
   scienceclaw_mongo_data:
   scienceclaw_frontend_node_modules:
   scienceclaw_frontend_npm_cache:
+  scienceclaw_caddy_data:
+  scienceclaw_caddy_config:

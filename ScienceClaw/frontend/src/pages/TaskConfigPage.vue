@@ -282,7 +282,7 @@ import type { ModelConfig } from '@/api/models';
 import type { Webhook } from '@/api/webhooks';
 import { getAuthStatus } from '@/api/auth';
 import { useSettingsDialog } from '@/composables/useSettingsDialog';
-import { showSuccessToast, showErrorToast } from '@/utils/toast';
+import { showErrorToast } from '@/utils/toast';
 import ProviderIcon from '@/components/icons/ProviderIcon.vue';
 
 const { t } = useI18n();
@@ -329,7 +329,7 @@ const selectedWebhooks = computed(() =>
 const availableWebhooks = computed(() =>
   allWebhooks.value.filter(wh => !form.value.webhook_ids.includes(wh.id))
 );
-const TYPE_LABELS: Record<string, string> = { feishu: '飞书', dingtalk: '钉钉', wecom: '企微' };
+const TYPE_LABELS: Record<string, string> = { feishu: '飞书', dingtalk: '钉钉', wecom: '企微', telegram: 'Telegram' };
 const webhookTypeLabel = (t: string) => TYPE_LABELS[t] || t;
 
 function toggleWebhookDropdown() {
