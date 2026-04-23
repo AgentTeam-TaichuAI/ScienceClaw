@@ -98,6 +98,8 @@ Once installed, double-click the desktop shortcut to start ScienceClaw — ready
 
 ###  macOS / Linux Users — Docker Deployment
 
+> 📖 For a detailed step-by-step deployment guide, see [**Deployment Guide (中文)**](docs/deployment-guide-zh.md).
+
 #### Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) & [Docker Compose](https://docs.docker.com/compose/install/) (Docker Desktop includes Compose)
